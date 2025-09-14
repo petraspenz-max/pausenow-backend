@@ -1,5 +1,4 @@
 const admin = require('firebase-admin');
-
 // Firebase Admin SDK initialisieren
 if (!admin.apps.length) {
     const serviceAccount = JSON.parse(process.env.FIREBASE_PRIVATE_KEY);
@@ -8,7 +7,6 @@ if (!admin.apps.length) {
         projectId: 'pausenow-daae2'
     });
 }
-
 exports.handler = async (event, context) => {
     // CORS Headers
     const headers = {
@@ -16,7 +14,6 @@ exports.handler = async (event, context) => {
         'Access-Control-Allow-Headers': 'Content-Type',
         'Access-Control-Allow-Methods': 'POST, OPTIONS'
     };
-
     // Handle OPTIONS request
     if (event.httpMethod === 'OPTIONS') {
         return {
@@ -25,7 +22,6 @@ exports.handler = async (event, context) => {
             body: ''
         };
     }
-
     // Nur POST-Requests erlauben
     if (event.httpMethod !== 'POST') {
         return {
@@ -34,10 +30,8 @@ exports.handler = async (event, context) => {
             body: JSON.stringify({ error: 'Method not allowed' })
         };
     }
-
     try {
         const { token, action, childId, childName, childFCMToken } = JSON.parse(event.body);
-
         // Validierung
         if (!token || !action) {
             return {
@@ -46,9 +40,9 @@ exports.handler = async (event, context) => {
                 body: JSON.stringify({ error: 'Token und Action sind erforderlich' })
             };
         }
-
         console.log(`Push Request: ${action} to ${token.substring(0, 20)}...`);
-
+        console.log(`childFCMToken received: ${childFCMToken ? childFCMToken.substring(0, 20) + '...' : 'NOT PROVIDED'}`);
+        
         // Push Notification senden
         const message = {
             token: token,
@@ -56,6 +50,7 @@ exports.handler = async (event, context) => {
                 action: action,
                 childId: childId || '',
                 childName: childName || '',
+                childFCMToken: childFCMToken || '',  // ← DAS WAR DER FIX!
                 timestamp: Date.now().toString()
             },
             notification: {
@@ -77,11 +72,9 @@ exports.handler = async (event, context) => {
                 priority: 'high'
             }
         };
-
         const response = await admin.messaging().send(message);
         
         console.log(`✅ Push sent successfully: ${response}`);
-
         return {
             statusCode: 200,
             headers,
@@ -92,7 +85,6 @@ exports.handler = async (event, context) => {
                 timestamp: new Date().toISOString()
             })
         };
-
     } catch (error) {
         console.error('Push Error:', error);
         
@@ -106,7 +98,6 @@ exports.handler = async (event, context) => {
         };
     }
 };
-
 function getNotificationBody(action, childName) {
     switch (action) {
         case 'pause':

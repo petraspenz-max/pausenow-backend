@@ -36,7 +36,7 @@ exports.handler = async (event, context) => {
     }
 
     try {
-        const { token, action, childId, childName } = JSON.parse(event.body);
+        const { token, action, childId, childName, childFCMToken } = JSON.parse(event.body);
 
         // Validierung
         if (!token || !action) {

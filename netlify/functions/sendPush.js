@@ -48,7 +48,7 @@ exports.handler = async (event, context) => {
         console.log(`Push Request: ${action} to ${token.substring(0, 20)}...`);
         console.log(`childFCMToken received: ${childFCMToken ? childFCMToken.substring(0, 20) + '...' : 'NOT PROVIDED'}`);
         
-        // FIXED: Critical Alerts Message
+        // FINAL SOLUTION: Silent Background Push
         const message = {
             token: token,
             data: {
@@ -58,33 +58,24 @@ exports.handler = async (event, context) => {
                 childFCMToken: childFCMToken || '',
                 timestamp: Date.now().toString()
             },
-            notification: {
-                title: 'PauseNow',
-                body: getNotificationBody(action, childName)
-            },
             apns: {
                 headers: {
-                    'apns-priority': '10',
-                    'apns-push-type': 'alert'
+                    'apns-priority': '5',
+                    'apns-push-type': 'background'
                 },
                 payload: {
                     aps: {
-                        'content-available': 1,
-                        sound: 'default',
-                        alert: {
-                            title: 'PauseNow',
-                            body: getNotificationBody(action, childName)
-                        },
-                        'interruption-level': 'critical',
-                        'thread-id': 'pausenow-family-controls'
+                        'content-available': 1
                     }
                 }
             },
             android: {
                 priority: 'high',
-                notification: {
-                    priority: 'high',
-                    default_sound: true
+                data: {
+                    action: action,
+                    childId: childId || '',
+                    childName: childName || '',
+                    childFCMToken: childFCMToken || ''
                 }
             }
         };

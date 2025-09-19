@@ -65,11 +65,12 @@ exports.handler = async (event, context) => {
                 apns: {
                     payload: {
                         aps: {
-                            "alert": {
-                                "title": "Freischaltungsanfrage", 
-                                "body": childName + " möchte freigeschaltet werden"
-                            },
                             "sound": "default",
+                            "alert": {
+                                "title": "AUSZEIT",
+                                "body": "Apps werden gesperrt"
+                            },
+                            "critical": 1,  // Kritische Benachrichtigung
                             "content-available": 1
                         }
                     }

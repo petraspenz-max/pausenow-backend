@@ -59,21 +59,17 @@ exports.handler = async (event, context) => {
                 timestamp: Date.now().toString()
             },
             apns: {
-                headers: {
-                    'apns-priority': '5',
-                    'apns-push-type': 'background'
-                },
                 payload: {
                     aps: {
-                        "content-available": 1,
                         "alert": {
-                        "title": "Freischaltungsanfrage", 
-                        "body": childName + " möchte freigeschaltet werden"
-                    },
-                    "sound": "default"
+                            "title": "Freischaltungsanfrage", 
+                            "body": childName + " möchte freigeschaltet werden"
+                        },
+                        "sound": "default",
+                        "content-available": 1
                     }
                 }
-            },
+            }
             android: {
                 priority: 'high',
                 data: {

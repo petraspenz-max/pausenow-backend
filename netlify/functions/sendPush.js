@@ -67,8 +67,8 @@ exports.handler = async (event, context) => {
                         aps: {
                             "sound": "default",
                             "alert": {
-                                "title": "AUSZEIT",
-                                "body": "PauseNow Freigabeanforderung"
+                                "title": "PauseNow",
+                                "body": "Freigabeanforderung"
                             },
                             "critical": 1,  // Kritische Benachrichtigung
                             "content-available": 1

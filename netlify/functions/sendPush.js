@@ -48,38 +48,79 @@ exports.handler = async (event, context) => {
         console.log(`Push Request: ${action} to ${token.substring(0, 20)}...`);
         console.log(`childFCMToken received: ${childFCMToken ? childFCMToken.substring(0, 20) + '...' : 'NOT PROVIDED'}`);
         
-        // FINAL SOLUTION: Silent Background Push
-        const message = {
-            token: token,
-            data: {
-                action: action,
-                childId: childId || '',
-                childName: childName || '',
-                childFCMToken: childFCMToken || '',
-                timestamp: Date.now().toString()
-            },
-            apns: {
-                payload: {
-                    aps: {
-                        "alert": {
-                            "title": "Freischaltungsanfrage", 
-                            "body": childName + " möchte freigeschaltet werden"
-                        },
-                        "sound": "default",
-                        "content-available": 1
-                    }
-                }
-            }
-            android: {
-                priority: 'high',
+        // Conditional Message basierend auf Action
+        let message;
+
+        if (action === 'unlock_request') {
+            // Alert Push für Unlock Requests
+            message = {
+                token: token,
                 data: {
                     action: action,
                     childId: childId || '',
                     childName: childName || '',
-                    childFCMToken: childFCMToken || ''
+                    childFCMToken: childFCMToken || '',
+                    timestamp: Date.now().toString()
+                },
+                apns: {
+                    payload: {
+                        aps: {
+                            "alert": {
+                                "title": "Freischaltungsanfrage", 
+                                "body": childName + " möchte freigeschaltet werden"
+                            },
+                            "sound": "default",
+                            "content-available": 1
+                        }
+                    }
+                },
+                android: {
+                    priority: 'high',
+                    notification: {
+                        title: "Freischaltungsanfrage",
+                        body: childName + " möchte freigeschaltet werden"
+                    },
+                    data: {
+                        action: action,
+                        childId: childId || '',
+                        childName: childName || '',
+                        childFCMToken: childFCMToken || ''
+                    }
                 }
-            }
-        };
+            };
+        } else {
+            // Silent Push für alle anderen Actions (pause, activate, etc.)
+            message = {
+                token: token,
+                data: {
+                    action: action,
+                    childId: childId || '',
+                    childName: childName || '',
+                    childFCMToken: childFCMToken || '',
+                    timestamp: Date.now().toString()
+                },
+                apns: {
+                    headers: {
+                        'apns-priority': '5',
+                        'apns-push-type': 'background'
+                    },
+                    payload: {
+                        aps: {
+                            "content-available": 1
+                        }
+                    }
+                },
+                android: {
+                    priority: 'high',
+                    data: {
+                        action: action,
+                        childId: childId || '',
+                        childName: childName || '',
+                        childFCMToken: childFCMToken || ''
+                    }
+                }
+            };
+        }
 
         const response = await admin.messaging().send(message);
         
@@ -94,7 +135,6 @@ exports.handler = async (event, context) => {
                 timestamp: new Date().toISOString()
             })
         };
-
     } catch (error) {
         console.error('Push Error:', error);
         

@@ -68,7 +68,7 @@ exports.handler = async (event, context) => {
                             "sound": "default",
                             "alert": {
                                 "title": "AUSZEIT",
-                                "body": "PauseNow - Aktion erforderlich"
+                                "body": "PauseNow Freigabeanforderung"
                             },
                             "critical": 1,  // Kritische Benachrichtigung
                             "content-available": 1

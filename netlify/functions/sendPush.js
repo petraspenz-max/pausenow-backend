@@ -101,9 +101,8 @@ exports.handler = async (event, context) => {
                 },
                 apns: {
                     headers: {
-                        'apns-priority': '10',
+                        'apns-priority': '5',
                         'apns-push-type': 'background'
-                        'apns-expiration': Math.floor(Date.now() / 1000) + 1800
                     },
                     payload: {
                         aps: {

@@ -65,7 +65,12 @@ exports.handler = async (event, context) => {
                 },
                 payload: {
                     aps: {
-                        'content-available': 1
+                        "content-available": 1,
+                        "alert": {
+                        "title": "Freischaltungsanfrage", 
+                        "body": childName + " möchte freigeschaltet werden"
+                    },
+                    "sound": "default"
                     }
                 }
             },

@@ -35,97 +35,52 @@ exports.handler = async (event, context) => {
     }
 
     try {
-        const { token, action, childId, childName, childFCMToken } = JSON.parse(event.body);
+        const { token, action, childId, childName, childFCMToken, tokens } = JSON.parse(event.body);
 
-        if (!token || !action) {
+        if ((!token && !tokens) || !action) {
             return {
                 statusCode: 400,
                 headers,
-                body: JSON.stringify({ error: 'Token und Action sind erforderlich' })
+                body: JSON.stringify({ error: 'Token/Tokens und Action sind erforderlich' })
             };
         }
 
-        console.log(`Push Request: ${action} to ${token.substring(0, 20)}...`);
-        console.log(`childFCMToken received: ${childFCMToken ? childFCMToken.substring(0, 20) + '...' : 'NOT PROVIDED'}`);
+        console.log(`Push Request: ${action}`);
+        console.log(`Single Token: ${token ? token.substring(0, 20) + '...' : 'NONE'}`);
+        console.log(`Multi Tokens: ${tokens ? tokens.length : 0}`);
         
-        // Conditional Message basierend auf Action
-        let message;
-
-        if (action === 'unlock_request') {
-            // Alert Push für Unlock Requests
-            message = {
-                token: token,
-                data: {
-                    action: action,
-                    childId: childId || '',
-                    childName: childName || '',
-                    childFCMToken: childFCMToken || '',
-                    timestamp: Date.now().toString()
-                },
-                apns: {
-                    payload: {
-                        aps: {
-                            "sound": "default",
-                            "alert": {
-                                "title": "PauseNow",
-                                "body": "Freigabeanforderung"
-                            },
-                            "critical": 1,  // Kritische Benachrichtigung
-                            "content-available": 1
-                        }
-                    }
-                },
-                android: {
-                    priority: 'high',
-                    notification: {
-                        title: "Freischaltungsanfrage",
-                        body: childName + " möchte freigeschaltet werden"
-                    },
-                    data: {
-                        action: action,
-                        childId: childId || '',
-                        childName: childName || '',
-                        childFCMToken: childFCMToken || ''
-                    }
+        // Multi-Parent: Wenn tokens Array vorhanden, an alle senden
+        if (tokens && Array.isArray(tokens)) {
+            const results = [];
+            for (const targetToken of tokens) {
+                try {
+                    const message = buildMessage(targetToken, action, childId, childName, childFCMToken);
+                    const response = await admin.messaging().send(message);
+                    results.push({ token: targetToken.substring(0, 20), success: true, messageId: response });
+                    console.log(`✅ Multi-Push sent to: ${targetToken.substring(0, 20)}...`);
+                } catch (error) {
+                    results.push({ token: targetToken.substring(0, 20), success: false, error: error.message });
+                    console.error(`❌ Multi-Push failed to: ${targetToken.substring(0, 20)}...`, error.message);
                 }
-            };
-        } else {
-            // Silent Push für alle anderen Actions (pause, activate, etc.)
-            message = {
-                token: token,
-                data: {
+            }
+            
+            return {
+                statusCode: 200,
+                headers,
+                body: JSON.stringify({ 
+                    success: true, 
+                    results: results,
                     action: action,
-                    childId: childId || '',
-                    childName: childName || '',
-                    childFCMToken: childFCMToken || '',
-                    timestamp: Date.now().toString()
-                },
-                apns: {
-                    headers: {
-                        'apns-priority': '5',
-                        'apns-push-type': 'background'
-                    },
-                    payload: {
-                        aps: {
-                            "content-available": 1
-                        }
-                    }
-                },
-                android: {
-                    priority: 'high',
-                    data: {
-                        action: action,
-                        childId: childId || '',
-                        childName: childName || '',
-                        childFCMToken: childFCMToken || ''
-                    }
-                }
+                    timestamp: new Date().toISOString()
+                })
             };
         }
-
+        
+        // Single-Parent: Normale Funktionalität (backward compatibility)
+        const message = buildMessage(token, action, childId, childName, childFCMToken);
         const response = await admin.messaging().send(message);
         
-        console.log(`✅ Push sent successfully: ${response}`);
+        console.log(`✅ Single Push sent successfully: ${response}`);
         return {
             statusCode: 200,
             headers,
@@ -150,6 +105,77 @@ exports.handler = async (event, context) => {
     }
 };
 
+function buildMessage(token, action, childId, childName, childFCMToken) {
+    // Basis-Datenstruktur für alle Actions
+    const baseData = {
+        action: action,
+        childId: childId || '',
+        childName: childName || '',
+        childFCMToken: childFCMToken || '',
+        timestamp: Date.now().toString()
+    };
+
+    // Action-spezifische Nachrichten
+    switch (action) {
+        case 'unlock_request':
+            return {
+                token: token,
+                data: baseData,
+                apns: {
+                    payload: {
+                        aps: {
+                            "sound": "default",
+                            "alert": {
+                                "title": "PauseNow",
+                                "body": `${childName} möchte freigeschaltet werden`
+                            },
+                            "critical": 1,
+                            "content-available": 1
+                        }
+                    }
+                },
+                android: {
+                    priority: 'high',
+                    notification: {
+                        title: "Freischaltungsanfrage",
+                        body: `${childName} möchte freigeschaltet werden`
+                    },
+                    data: baseData
+                }
+            };
+
+        case 'family_sync':
+        case 'child_toggled':
+        case 'child_added':
+        case 'child_removed':
+        case 'partner_joined':
+        case 'pairing_confirmed':
+        case 'pause':
+        case 'activate':
+        default:
+            // Silent Push für alle anderen Actions
+            return {
+                token: token,
+                data: baseData,
+                apns: {
+                    headers: {
+                        'apns-priority': '5',
+                        'apns-push-type': 'background'
+                    },
+                    payload: {
+                        aps: {
+                            "content-available": 1
+                        }
+                    }
+                },
+                android: {
+                    priority: 'high',
+                    data: baseData
+                }
+            };
+    }
+}
+
 function getNotificationBody(action, childName) {
     switch (action) {
         case 'pause':
@@ -160,6 +186,14 @@ function getNotificationBody(action, childName) {
             return `${childName} möchte freigeschaltet werden`;
         case 'pairing_confirmed':
             return 'Gerät erfolgreich verbunden';
+        case 'family_sync':
+            return 'Familie synchronisiert';
+        case 'child_toggled':
+            return 'Kind-Status geändert';
+        case 'child_added':
+            return 'Neues Kind hinzugefügt';
+        case 'partner_joined':
+            return 'Neuer Partner beigetreten';
         default:
             return 'PauseNow Benachrichtigung';
     }

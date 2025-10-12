@@ -13,7 +13,7 @@ exports.handler = async (event, context) => {
     // CORS Headers
     const headers = {
         'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'Content-Type',
+        'Access-Control-Allow-Headers': 'Content-Type, X-Api-Key',
         'Access-Control-Allow-Methods': 'POST, OPTIONS'
     };
 
@@ -33,16 +33,20 @@ exports.handler = async (event, context) => {
             body: JSON.stringify({ error: 'Method not allowed' })
         };
     }
-const API_KEY = process.env.PAUSENOW_API_KEY || 'dev-key-pausenow-2025';
-const requestKey = event.headers['x-api-key'] || event.headers['X-Api-Key'];
 
-if (!requestKey || requestKey !== API_KEY) {
-    return {
-        statusCode: 401,
-        headers,
-        body: JSON.stringify({ error: 'Unauthorized' })
-    };
-}
+    // Security Check
+    const API_KEY = process.env.PAUSENOW_API_KEY || 'dev-key-pausenow-2025';
+    const requestKey = event.headers['x-api-key'] || event.headers['X-Api-Key'];
+
+    if (!requestKey || requestKey !== API_KEY) {
+        console.log('Unauthorized request blocked');
+        return {
+            statusCode: 401,
+            headers,
+            body: JSON.stringify({ error: 'Unauthorized' })
+        };
+    }
+
     try {
         const { token, action, childId, childName, childFCMToken, tokens } = JSON.parse(event.body);
 
@@ -60,15 +64,43 @@ if (!requestKey || requestKey !== API_KEY) {
         
         // Multi-Parent: Wenn tokens Array vorhanden, an alle senden
         if (tokens && Array.isArray(tokens)) {
+            // WICHTIG: Deduplizierung der Tokens!
+            const uniqueTokens = [...new Set(tokens)];
+            
+            if (uniqueTokens.length !== tokens.length) {
+                console.log(`⚠️ Duplicate tokens removed: ${tokens.length} -> ${uniqueTokens.length}`);
+            }
+            
             const results = [];
-            for (const targetToken of tokens) {
+            const processedTokens = new Set(); // Verhindere doppelte Verarbeitung
+            
+            for (const targetToken of uniqueTokens) {
+                // Skip wenn bereits verarbeitet
+                if (processedTokens.has(targetToken)) {
+                    console.log(`⚠️ Skipping duplicate token: ${targetToken.substring(0, 20)}...`);
+                    continue;
+                }
+                processedTokens.add(targetToken);
+                
                 try {
                     const message = buildMessage(targetToken, action, childId, childName, childFCMToken);
                     const response = await admin.messaging().send(message);
-                    results.push({ token: targetToken.substring(0, 20), success: true, messageId: response });
+                    results.push({ 
+                        token: targetToken.substring(0, 20), 
+                        success: true, 
+                        messageId: response 
+                    });
                     console.log(`✅ Multi-Push sent to: ${targetToken.substring(0, 20)}...`);
+                    
+                    // Kleine Verzögerung zwischen Nachrichten (verhindert Rate-Limiting)
+                    await new Promise(resolve => setTimeout(resolve, 50));
+                    
                 } catch (error) {
-                    results.push({ token: targetToken.substring(0, 20), success: false, error: error.message });
+                    results.push({ 
+                        token: targetToken.substring(0, 20), 
+                        success: false, 
+                        error: error.message 
+                    });
                     console.error(`❌ Multi-Push failed to: ${targetToken.substring(0, 20)}...`, error.message);
                 }
             }
@@ -155,10 +187,16 @@ function buildMessage(token, action, childId, childName, childFCMToken) {
 
         case 'family_sync':
         case 'child_toggled':
+        case 'child_status_sync':
         case 'child_added':
         case 'child_removed':
+        case 'child_deleted':
         case 'partner_joined':
         case 'pairing_confirmed':
+        case 'parent_token_update':
+        case 'child_token_update':
+        case 'child_token_sync':
+        case 'close_unlock_alerts':
         case 'pause':
         case 'activate':
         default:
@@ -199,8 +237,12 @@ function getNotificationBody(action, childName) {
             return 'Familie synchronisiert';
         case 'child_toggled':
             return 'Kind-Status geändert';
+        case 'child_status_sync':
+            return 'Status synchronisiert';
         case 'child_added':
             return 'Neues Kind hinzugefügt';
+        case 'child_deleted':
+            return 'Kind entfernt';
         case 'partner_joined':
             return 'Neuer Partner beigetreten';
         default:

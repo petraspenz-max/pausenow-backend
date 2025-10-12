@@ -33,7 +33,16 @@ exports.handler = async (event, context) => {
             body: JSON.stringify({ error: 'Method not allowed' })
         };
     }
+const API_KEY = process.env.PAUSENOW_API_KEY || 'dev-key-pausenow-2025';
+const requestKey = event.headers['x-api-key'] || event.headers['X-Api-Key'];
 
+if (!requestKey || requestKey !== API_KEY) {
+    return {
+        statusCode: 401,
+        headers,
+        body: JSON.stringify({ error: 'Unauthorized' })
+    };
+}
     try {
         const { token, action, childId, childName, childFCMToken, tokens } = JSON.parse(event.body);
 

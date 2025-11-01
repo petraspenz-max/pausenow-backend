@@ -52,138 +52,89 @@ exports.handler = async (event, context) => {
         
         // NEU: Status Check Action
         if (requestBody.action === 'status_check') {
-    const { token, childId } = requestBody;
-    
-    if (!token || !childId) {
-        return {
-            statusCode: 400,
-            headers,
-            body: JSON.stringify({ 
-                success: false,
-                error: 'Token und childId erforderlich für status_check' 
-            })
-        };
-    }
-    
-    try {
-        // Test-Push senden um Token zu validieren
-        const testMessage = {
-            token: token,
-            data: { 
-                type: 'status_check',
-                timestamp: Date.now().toString()
-            },
-            apns: {
-                headers: {
-                    'apns-push-type': 'background',
-                    'apns-priority': '10'
-                },
-                payload: {
-                    aps: {
-                        "content-available": 1
-                    }
-                }
+            const { token, childId } = requestBody;
+            
+            if (!token || !childId) {
+                return {
+                    statusCode: 400,
+                    headers,
+                    body: JSON.stringify({ 
+                        success: false,
+                        error: 'Token und childId erforderlich für status_check' 
+                    })
+                };
             }
-        };
-        
-        await admin.messaging().send(testMessage);
-
-        return {
-    statusCode: 200,
-    headers,
-    body: JSON.stringify({
-        success: true,
-        status: 'active',
-        childId: childId,
-        message: 'App ist installiert',
-        timestamp: new Date().toISOString()
-    })
-};
-        // Token ist gültig - App ist installiert und erreichbar
-        // OPTIONAL: Firestore Update (nur wenn sicher ist, dass Dokument existiert)
-        try {
-            // Verwende set mit merge statt update (erstellt Dokument falls nicht vorhanden)
-            await admin.firestore()
-                .collection('children')
-                .doc(childId)
-                .set({
-                    lastChecked: admin.firestore.FieldValue.serverTimestamp(),
-                    tokenValid: true,
-                    isDeleted: false
-                }, { merge: true });  // merge: true = erstellt oder updated
             
-            console.log(`✅ Firestore updated for child: ${childId}`);
-        } catch (firestoreError) {
-            // Firestore Fehler ignorieren - wichtig ist nur der Token-Check
-            console.log(`⚠️ Firestore update failed (non-critical): ${firestoreError.message}`);
-        }
-        
-        // Response senden - unabhängig vom Firestore Update!
-        return {
-            statusCode: 200,
-            headers,
-            body: JSON.stringify({
-                success: true,
-                status: 'active',
-                childId: childId,
-                message: 'App ist installiert und erreichbar',
-                timestamp: new Date().toISOString()
-            })
-        };
-        
-    } catch (error) {
-        console.log('Token validation error:', error.code);
-        
-        // Token ungültig = App gelöscht
-        if (error.code === 'messaging/invalid-registration-token' ||
-            error.code === 'messaging/registration-token-not-registered') {
-            
-            // OPTIONAL: Als gelöscht markieren (mit robustem Error-Handling)
             try {
-                await admin.firestore()
-                    .collection('children')
-                    .doc(childId)
-                    .set({
-                        isDeleted: true,
-                        deletedAt: admin.firestore.FieldValue.serverTimestamp(),
-                        tokenValid: false,
-                        isConnected: false
-                    }, { merge: true });
+                // Test-Push senden um Token zu validieren
+                const testMessage = {
+                    token: token,
+                    data: { 
+                        type: 'status_check',
+                        timestamp: Date.now().toString()
+                    },
+                    apns: {
+                        headers: {
+                            'apns-push-type': 'background',
+                            'apns-priority': '10'
+                        },
+                        payload: {
+                            aps: {
+                                "content-available": 1
+                            }
+                        }
+                    }
+                };
+                
+                await admin.messaging().send(testMessage);
+                
+                // Token ist gültig - Return HIER sofort!
+                return {
+                    statusCode: 200,
+                    headers,
+                    body: JSON.stringify({
+                        success: true,
+                        status: 'active',
+                        childId: childId,
+                        message: 'App ist installiert',
+                        timestamp: new Date().toISOString()
+                    })
+                };
+                
+            } catch (error) {
+                console.log('Token validation error:', error.code);
+                
+                // Token ungültig = App gelöscht
+                if (error.code === 'messaging/invalid-registration-token' ||
+                    error.code === 'messaging/registration-token-not-registered') {
                     
-                console.log(`✅ Child marked as deleted: ${childId}`);
-            } catch (firestoreError) {
-                console.log(`⚠️ Firestore update failed (non-critical): ${firestoreError.message}`);
+                    return {
+                        statusCode: 200,
+                        headers,
+                        body: JSON.stringify({
+                            success: true,
+                            status: 'deleted',
+                            childId: childId,
+                            message: 'App wurde gelöscht',
+                            timestamp: new Date().toISOString()
+                        })
+                    };
+                }
+                
+                // Andere Fehler = offline
+                return {
+                    statusCode: 200,
+                    headers,
+                    body: JSON.stringify({ 
+                        success: true,
+                        status: 'offline',
+                        childId: childId,
+                        message: 'Gerät ist offline',
+                        timestamp: new Date().toISOString()
+                    })
+                };
             }
-            
-            // Response senden - unabhängig vom Firestore Update!
-            return {
-                statusCode: 200,
-                headers,
-                body: JSON.stringify({
-                    success: true,
-                    status: 'deleted',
-                    childId: childId,
-                    message: 'App wurde gelöscht',
-                    timestamp: new Date().toISOString()
-                })
-            };
         }
-        
-        // Andere Fehler = offline oder temporärer Fehler
-        return {
-            statusCode: 200,
-            headers,
-            body: JSON.stringify({ 
-                success: true,
-                status: 'offline',
-                childId: childId,
-                message: 'Gerät ist offline oder temporärer Fehler',
-                error: error.message,
-                timestamp: new Date().toISOString()
-            })
-        };
-    }
-}
         
         // BESTEHENDER CODE für normale Push-Nachrichten
         const { token, action, childId, childName, childFCMToken, tokens } = requestBody;
@@ -358,32 +309,5 @@ function buildMessage(token, action, childId, childName, childFCMToken) {
                     data: baseData
                 }
             };
-    }
-}
-
-function getNotificationBody(action, childName) {
-    switch (action) {
-        case 'pause':
-            return 'Deine Apps wurden pausiert';
-        case 'activate':
-            return 'Deine Apps wurden freigeschaltet';
-        case 'unlock_request':
-            return `${childName} möchte freigeschaltet werden`;
-        case 'pairing_confirmed':
-            return 'Gerät erfolgreich verbunden';
-        case 'family_sync':
-            return 'Familie synchronisiert';
-        case 'child_toggled':
-            return 'Kind-Status geändert';
-        case 'child_status_sync':
-            return 'Status synchronisiert';
-        case 'child_added':
-            return 'Neues Kind hinzugefügt';
-        case 'child_deleted':
-            return 'Kind entfernt';
-        case 'partner_joined':
-            return 'Neuer Partner beigetreten';
-        default:
-            return 'PauseNow Benachrichtigung';
     }
 }

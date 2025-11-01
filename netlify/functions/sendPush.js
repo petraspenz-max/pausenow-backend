@@ -223,13 +223,33 @@ exports.handler = async (event, context) => {
         };
     } catch (error) {
         console.error('Push Error:', error);
+        console.error('Error Code:', error.code);
         
+        // NEU: FCM Error Codes auswerten
+        if (error.code === 'messaging/invalid-registration-token' ||
+            error.code === 'messaging/registration-token-not-registered') {
+            
+            console.log('❌ Token ungültig - App wurde gelöscht');
+            return {
+                statusCode: 200,  // WICHTIG: 200, nicht 500!
+                headers,
+                body: JSON.stringify({ 
+                    success: false,
+                    error: 'NotRegistered',
+                    message: 'Token ist nicht mehr registriert - App wurde gelöscht',
+                    timestamp: new Date().toISOString()
+                })
+            };
+        }
+        
+        // Bei anderen Fehlern: 500 wie bisher
         return {
             statusCode: 500,
             headers,
             body: JSON.stringify({ 
                 error: 'Failed to send push notification',
-                details: error.message 
+                details: error.message,
+                code: error.code || 'unknown'
             })
         };
     }

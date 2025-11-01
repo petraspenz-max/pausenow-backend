@@ -87,7 +87,18 @@ exports.handler = async (event, context) => {
         };
         
         await admin.messaging().send(testMessage);
-        
+
+        return {
+    statusCode: 200,
+    headers,
+    body: JSON.stringify({
+        success: true,
+        status: 'active',
+        childId: childId,
+        message: 'App ist installiert',
+        timestamp: new Date().toISOString()
+    })
+};
         // Token ist gültig - App ist installiert und erreichbar
         // OPTIONAL: Firestore Update (nur wenn sicher ist, dass Dokument existiert)
         try {

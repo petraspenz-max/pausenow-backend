@@ -52,103 +52,127 @@ exports.handler = async (event, context) => {
         
         // NEU: Status Check Action
         if (requestBody.action === 'status_check') {
-            const { token, childId } = requestBody;
-            
-            if (!token || !childId) {
-                return {
-                    statusCode: 400,
-                    headers,
-                    body: JSON.stringify({ error: 'Token und childId erforderlich für status_check' })
-                };
-            }
-            
-            try {
-                // Test-Push senden um Token zu validieren
-                const testMessage = {
-                    token: token,
-                    data: { 
-                        type: 'status_check',
-                        timestamp: Date.now().toString()
-                    },
-                    apns: {
-                        headers: {
-                            'apns-push-type': 'background',
-                            'apns-priority': '10'
-                        },
-                        payload: {
-                            aps: {
-                                "content-available": 1
-                            }
-                        }
+    const { token, childId } = requestBody;
+    
+    if (!token || !childId) {
+        return {
+            statusCode: 400,
+            headers,
+            body: JSON.stringify({ 
+                success: false,
+                error: 'Token und childId erforderlich für status_check' 
+            })
+        };
+    }
+    
+    try {
+        // Test-Push senden um Token zu validieren
+        const testMessage = {
+            token: token,
+            data: { 
+                type: 'status_check',
+                timestamp: Date.now().toString()
+            },
+            apns: {
+                headers: {
+                    'apns-push-type': 'background',
+                    'apns-priority': '10'
+                },
+                payload: {
+                    aps: {
+                        "content-available": 1
                     }
-                };
-                
-                await admin.messaging().send(testMessage);
-                
-                // Token ist gültig - Update Firestore
+                }
+            }
+        };
+        
+        await admin.messaging().send(testMessage);
+        
+        // Token ist gültig - App ist installiert und erreichbar
+        // OPTIONAL: Firestore Update (nur wenn sicher ist, dass Dokument existiert)
+        try {
+            // Verwende set mit merge statt update (erstellt Dokument falls nicht vorhanden)
+            await admin.firestore()
+                .collection('children')
+                .doc(childId)
+                .set({
+                    lastChecked: admin.firestore.FieldValue.serverTimestamp(),
+                    tokenValid: true,
+                    isDeleted: false
+                }, { merge: true });  // merge: true = erstellt oder updated
+            
+            console.log(`✅ Firestore updated for child: ${childId}`);
+        } catch (firestoreError) {
+            // Firestore Fehler ignorieren - wichtig ist nur der Token-Check
+            console.log(`⚠️ Firestore update failed (non-critical): ${firestoreError.message}`);
+        }
+        
+        // Response senden - unabhängig vom Firestore Update!
+        return {
+            statusCode: 200,
+            headers,
+            body: JSON.stringify({
+                success: true,
+                status: 'active',
+                childId: childId,
+                message: 'App ist installiert und erreichbar',
+                timestamp: new Date().toISOString()
+            })
+        };
+        
+    } catch (error) {
+        console.log('Token validation error:', error.code);
+        
+        // Token ungültig = App gelöscht
+        if (error.code === 'messaging/invalid-registration-token' ||
+            error.code === 'messaging/registration-token-not-registered') {
+            
+            // OPTIONAL: Als gelöscht markieren (mit robustem Error-Handling)
+            try {
                 await admin.firestore()
                     .collection('children')
                     .doc(childId)
-                    .update({
-                        lastChecked: admin.firestore.FieldValue.serverTimestamp(),
-                        tokenValid: true,
-                        isDeleted: false
-                    });
-                
-                return {
-    statusCode: 200,
-    headers,
-    body: JSON.stringify({
-        success: true,  // <-- Das fehlte!
-        status: 'active',
-        childId: childId,  // <-- Auch hilfreich
-        message: 'App ist installiert und erreichbar',
-        timestamp: new Date().toISOString()
-    })
-};
-                
-            } catch (error) {
-                console.log('Token validation error:', error.code);
-                
-                // Token ungültig = App gelöscht
-                if (error.code === 'messaging/invalid-registration-token' ||
-                    error.code === 'messaging/registration-token-not-registered') {
+                    .set({
+                        isDeleted: true,
+                        deletedAt: admin.firestore.FieldValue.serverTimestamp(),
+                        tokenValid: false,
+                        isConnected: false
+                    }, { merge: true });
                     
-                    // Als gelöscht markieren
-                    await admin.firestore()
-                        .collection('children')
-                        .doc(childId)
-                        .update({
-                            isDeleted: true,
-                            deletedAt: admin.firestore.FieldValue.serverTimestamp(),
-                            tokenValid: false,
-                            isConnected: false
-                        });
-                    
-                    return {
-    statusCode: 200,
-    headers,
-    body: JSON.stringify({
-        success: true,
-        status: 'deleted',  // <-- Wichtig!
-        childId: childId,
-        message: 'App wurde gelöscht',
-        timestamp: new Date().toISOString()
-    })
-};
-                }
-                
-                // Andere Fehler = offline
-                return {
-                    statusCode: 200,
-                    headers,
-                    body: JSON.stringify({ 
-                        status: 'offline',
-                        message: 'Gerät ist offline'
-                    })
-                };
+                console.log(`✅ Child marked as deleted: ${childId}`);
+            } catch (firestoreError) {
+                console.log(`⚠️ Firestore update failed (non-critical): ${firestoreError.message}`);
             }
+            
+            // Response senden - unabhängig vom Firestore Update!
+            return {
+                statusCode: 200,
+                headers,
+                body: JSON.stringify({
+                    success: true,
+                    status: 'deleted',
+                    childId: childId,
+                    message: 'App wurde gelöscht',
+                    timestamp: new Date().toISOString()
+                })
+            };
         }
+        
+        // Andere Fehler = offline oder temporärer Fehler
+        return {
+            statusCode: 200,
+            headers,
+            body: JSON.stringify({ 
+                success: true,
+                status: 'offline',
+                childId: childId,
+                message: 'Gerät ist offline oder temporärer Fehler',
+                error: error.message,
+                timestamp: new Date().toISOString()
+            })
+        };
+    }
+}
         
         // BESTEHENDER CODE für normale Push-Nachrichten
         const { token, action, childId, childName, childFCMToken, tokens } = requestBody;

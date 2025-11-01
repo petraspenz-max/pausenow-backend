@@ -96,13 +96,16 @@ exports.handler = async (event, context) => {
                     });
                 
                 return {
-                    statusCode: 200,
-                    headers,
-                    body: JSON.stringify({ 
-                        status: 'active',
-                        message: 'App ist installiert und erreichbar'
-                    })
-                };
+    statusCode: 200,
+    headers,
+    body: JSON.stringify({
+        success: true,  // <-- Das fehlte!
+        status: 'active',
+        childId: childId,  // <-- Auch hilfreich
+        message: 'App ist installiert und erreichbar',
+        timestamp: new Date().toISOString()
+    })
+};
                 
             } catch (error) {
                 console.log('Token validation error:', error.code);
@@ -123,13 +126,16 @@ exports.handler = async (event, context) => {
                         });
                     
                     return {
-                        statusCode: 200,
-                        headers,
-                        body: JSON.stringify({ 
-                            status: 'deleted',
-                            message: 'App wurde gelöscht'
-                        })
-                    };
+    statusCode: 200,
+    headers,
+    body: JSON.stringify({
+        success: true,
+        status: 'deleted',  // <-- Wichtig!
+        childId: childId,
+        message: 'App wurde gelöscht',
+        timestamp: new Date().toISOString()
+    })
+};
                 }
                 
                 // Andere Fehler = offline

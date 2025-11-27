@@ -185,12 +185,24 @@ exports.handler = async (event, context) => {
                     await new Promise(resolve => setTimeout(resolve, 50));
                     
                 } catch (error) {
-                    results.push({ 
-                        token: targetToken.substring(0, 20), 
-                        success: false, 
-                        error: error.message 
-                    });
-                    console.error(`❌ Multi-Push failed to: ${targetToken.substring(0, 20)}...`, error.message);
+                    // NEU: FCM Error Codes auswerten für "App gelöscht"
+                    if (error.code === 'messaging/invalid-registration-token' ||
+                        error.code === 'messaging/registration-token-not-registered') {
+                        results.push({ 
+                            token: targetToken.substring(0, 20), 
+                            success: false, 
+                            error: 'NotRegistered',
+                            deleted: true
+                        });
+                        console.log(`❌ Token invalid - App deleted: ${targetToken.substring(0, 20)}...`);
+                    } else {
+                        results.push({ 
+                            token: targetToken.substring(0, 20), 
+                            success: false, 
+                            error: error.message 
+                        });
+                        console.error(`❌ Multi-Push failed to: ${targetToken.substring(0, 20)}...`, error.message);
+                    }
                 }
             }
             

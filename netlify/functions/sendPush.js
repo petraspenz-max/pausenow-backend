@@ -9,6 +9,51 @@ if (!admin.apps.length) {
     });
 }
 
+// Lokalisierte Strings für Push-Nachrichten
+const translations = {
+    en: {
+        paused: "Device paused",
+        activated: "Device activated",
+        unlockRequest: "wants to be unlocked"
+    },
+    de: {
+        paused: "Gerät pausiert",
+        activated: "Gerät aktiviert",
+        unlockRequest: "möchte freigeschaltet werden"
+    },
+    fr: {
+        paused: "Appareil en pause",
+        activated: "Appareil activé",
+        unlockRequest: "souhaite être débloqué"
+    },
+    es: {
+        paused: "Dispositivo pausado",
+        activated: "Dispositivo activado",
+        unlockRequest: "quiere ser desbloqueado"
+    },
+    it: {
+        paused: "Dispositivo in pausa",
+        activated: "Dispositivo attivato",
+        unlockRequest: "vuole essere sbloccato"
+    },
+    ja: {
+        paused: "デバイスが一時停止中",
+        activated: "デバイスが有効になりました",
+        unlockRequest: "ロック解除をリクエストしています"
+    },
+    ko: {
+        paused: "기기 일시정지됨",
+        activated: "기기 활성화됨",
+        unlockRequest: "잠금 해제를 요청합니다"
+    }
+};
+
+// Hilfsfunktion: Sprache ermitteln (Fallback: Englisch)
+function getTranslation(lang) {
+    const langCode = (lang || 'en').substring(0, 2).toLowerCase();
+    return translations[langCode] || translations.en;
+}
+
 exports.handler = async (event, context) => {
     // CORS Headers
     const headers = {
@@ -137,7 +182,7 @@ exports.handler = async (event, context) => {
         }
         
         // BESTEHENDER CODE für normale Push-Nachrichten
-        const { token, action, childId, childName, childFCMToken, tokens } = requestBody;
+        const { token, action, childId, childName, childFCMToken, tokens, language } = requestBody;
 
         if ((!token && !tokens) || !action) {
             return {
@@ -150,6 +195,7 @@ exports.handler = async (event, context) => {
         console.log(`Push Request: ${action}`);
         console.log(`Single Token: ${token ? token.substring(0, 20) + '...' : 'NONE'}`);
         console.log(`Multi Tokens: ${tokens ? tokens.length : 0}`);
+        console.log(`Language: ${language || 'en (default)'}`);
         
         // Multi-Parent: Wenn tokens Array vorhanden, an alle senden
         if (tokens && Array.isArray(tokens)) {
@@ -172,7 +218,7 @@ exports.handler = async (event, context) => {
                 processedTokens.add(targetToken);
                 
                 try {
-                    const message = buildMessage(targetToken, action, childId, childName, childFCMToken);
+                    const message = buildMessage(targetToken, action, childId, childName, childFCMToken, language);
                     const response = await admin.messaging().send(message);
                     results.push({ 
                         token: targetToken.substring(0, 20), 
@@ -219,7 +265,7 @@ exports.handler = async (event, context) => {
         }
         
         // Single-Parent: Normale Funktionalität (backward compatibility)
-        const message = buildMessage(token, action, childId, childName, childFCMToken);
+        const message = buildMessage(token, action, childId, childName, childFCMToken, language);
         const response = await admin.messaging().send(message);
         
         console.log(`✅ Single Push sent successfully: ${response}`);
@@ -267,7 +313,10 @@ exports.handler = async (event, context) => {
     }
 };
 
-function buildMessage(token, action, childId, childName, childFCMToken) {
+function buildMessage(token, action, childId, childName, childFCMToken, language) {
+    // Lokalisierte Texte holen
+    const t = getTranslation(language);
+    
     // Basis-Datenstruktur für alle Actions
     const baseData = {
         action: action,
@@ -289,7 +338,7 @@ function buildMessage(token, action, childId, childName, childFCMToken) {
                             "sound": "default",
                             "alert": {
                                 "title": "PauseNow",
-                                "body": `${childName} möchte freigeschaltet werden`
+                                "body": `${childName} ${t.unlockRequest}`
                             },
                             "critical": 1,
                             "content-available": 1
@@ -299,27 +348,44 @@ function buildMessage(token, action, childId, childName, childFCMToken) {
                 android: {
                     priority: 'high',
                     notification: {
-                        title: "Freischaltungsanfrage",
-                        body: `${childName} möchte freigeschaltet werden`
+                        title: "PauseNow",
+                        body: `${childName} ${t.unlockRequest}`
                     },
                     data: baseData
                 }
             };
 
-        case 'family_sync':
-        case 'child_toggled':
-        case 'child_status_sync':
-        case 'child_added':
-        case 'child_removed':
-        case 'child_deleted':
-        case 'partner_joined':
-        case 'pairing_confirmed':
-        case 'parent_token_update':
-        case 'child_token_update':
-        case 'child_token_sync':
-        case 'close_unlock_alerts':
         case 'pause':
         case 'activate':
+            // WICHTIG: Diese Actions brauchen NotificationServiceExtension!
+            return {
+                token: token,
+                data: baseData,
+                apns: {
+                    headers: {
+                        'apns-priority': '10',
+                        'apns-push-type': 'alert',
+                        'apns-expiration': Math.floor(Date.now() / 1000) + (28 * 24 * 60 * 60)
+                    },
+                    payload: {
+                        aps: {
+                            "mutable-content": 1,
+                            "content-available": 1,
+                            "sound": "default",
+                            "alert": {
+                                "title": "PauseNow",
+                                "body": action === 'pause' ? t.paused : t.activated
+                            }
+                        },
+                        action: action
+                    }
+                },
+                android: {
+                    priority: 'high',
+                    data: baseData
+                }
+            };
+
         default:
             // Silent Push für alle anderen Actions
             return {

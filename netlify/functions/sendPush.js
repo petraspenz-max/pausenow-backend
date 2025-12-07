@@ -365,7 +365,7 @@ function buildMessage(token, action, childId, childName, childFCMToken, language
                     headers: {
                         'apns-priority': '10',
                         'apns-push-type': 'alert',
-                        'apns-expiration': Math.floor(Date.now() / 1000) + (28 * 24 * 60 * 60)
+                        'apns-expiration': String(Math.floor(Date.now() / 1000) + (28 * 24 * 60 * 60))
                     },
                     payload: {
                         aps: {

@@ -9,7 +9,7 @@ if (!admin.apps.length) {
     });
 }
 
-// Lokalisierte Strings für Push-Nachrichten
+// Lokalisierte Strings für Push-Nachrichten (Fallback wenn iOS nichts sendet)
 const translations = {
     en: {
         paused: "Device paused",
@@ -182,7 +182,8 @@ exports.handler = async (event, context) => {
         }
         
         // BESTEHENDER CODE für normale Push-Nachrichten
-        const { token, action, childId, childName, childFCMToken, tokens, language } = requestBody;
+        // NEU: notification-Objekt aus iOS-Payload extrahieren
+        const { token, action, childId, childName, childFCMToken, tokens, language, notification } = requestBody;
 
         if ((!token && !tokens) || !action) {
             return {
@@ -196,6 +197,8 @@ exports.handler = async (event, context) => {
         console.log(`Single Token: ${token ? token.substring(0, 20) + '...' : 'NONE'}`);
         console.log(`Multi Tokens: ${tokens ? tokens.length : 0}`);
         console.log(`Language: ${language || 'en (default)'}`);
+        // NEU: Log ob iOS notification-Objekt vorhanden
+        console.log(`iOS Notification: ${notification ? 'YES (title: ' + notification.title + ')' : 'NO (using fallback)'}`);
         
         // Multi-Parent: Wenn tokens Array vorhanden, an alle senden
         if (tokens && Array.isArray(tokens)) {
@@ -203,7 +206,7 @@ exports.handler = async (event, context) => {
             const uniqueTokens = [...new Set(tokens)];
             
             if (uniqueTokens.length !== tokens.length) {
-                console.log(`⚠️ Duplicate tokens removed: ${tokens.length} -> ${uniqueTokens.length}`);
+                console.log(`Duplicate tokens removed: ${tokens.length} -> ${uniqueTokens.length}`);
             }
             
             const results = [];
@@ -212,20 +215,21 @@ exports.handler = async (event, context) => {
             for (const targetToken of uniqueTokens) {
                 // Skip wenn bereits verarbeitet
                 if (processedTokens.has(targetToken)) {
-                    console.log(`⚠️ Skipping duplicate token: ${targetToken.substring(0, 20)}...`);
+                    console.log(`Skipping duplicate token: ${targetToken.substring(0, 20)}...`);
                     continue;
                 }
                 processedTokens.add(targetToken);
                 
                 try {
-                    const message = buildMessage(targetToken, action, childId, childName, childFCMToken, language);
+                    // NEU: notification-Objekt an buildMessage übergeben
+                    const message = buildMessage(targetToken, action, childId, childName, childFCMToken, language, notification);
                     const response = await admin.messaging().send(message);
                     results.push({ 
                         token: targetToken.substring(0, 20), 
                         success: true, 
                         messageId: response 
                     });
-                    console.log(`✅ Multi-Push sent to: ${targetToken.substring(0, 20)}...`);
+                    console.log(`Multi-Push sent to: ${targetToken.substring(0, 20)}...`);
                     
                     // Kleine Verzögerung zwischen Nachrichten (verhindert Rate-Limiting)
                     await new Promise(resolve => setTimeout(resolve, 50));
@@ -240,14 +244,14 @@ exports.handler = async (event, context) => {
                             error: 'NotRegistered',
                             deleted: true
                         });
-                        console.log(`❌ Token invalid - App deleted: ${targetToken.substring(0, 20)}...`);
+                        console.log(`Token invalid - App deleted: ${targetToken.substring(0, 20)}...`);
                     } else {
                         results.push({ 
                             token: targetToken.substring(0, 20), 
                             success: false, 
                             error: error.message 
                         });
-                        console.error(`❌ Multi-Push failed to: ${targetToken.substring(0, 20)}...`, error.message);
+                        console.error(`Multi-Push failed to: ${targetToken.substring(0, 20)}...`, error.message);
                     }
                 }
             }
@@ -265,10 +269,11 @@ exports.handler = async (event, context) => {
         }
         
         // Single-Parent: Normale Funktionalität (backward compatibility)
-        const message = buildMessage(token, action, childId, childName, childFCMToken, language);
+        // NEU: notification-Objekt an buildMessage übergeben
+        const message = buildMessage(token, action, childId, childName, childFCMToken, language, notification);
         const response = await admin.messaging().send(message);
         
-        console.log(`✅ Single Push sent successfully: ${response}`);
+        console.log(`Single Push sent successfully: ${response}`);
         return {
             statusCode: 200,
             headers,
@@ -287,7 +292,7 @@ exports.handler = async (event, context) => {
         if (error.code === 'messaging/invalid-registration-token' ||
             error.code === 'messaging/registration-token-not-registered') {
             
-            console.log('❌ Token ungültig - App wurde gelöscht');
+            console.log('Token ungültig - App wurde gelöscht');
             return {
                 statusCode: 200,  // WICHTIG: 200, nicht 500!
                 headers,
@@ -313,9 +318,13 @@ exports.handler = async (event, context) => {
     }
 };
 
-function buildMessage(token, action, childId, childName, childFCMToken, language) {
-    // Lokalisierte Texte holen
+// NEU: notification-Parameter hinzugefügt
+function buildMessage(token, action, childId, childName, childFCMToken, language, notification) {
+    // Lokalisierte Texte holen (Fallback)
     const t = getTranslation(language);
+    
+    // NEU: iOS-Notification-Werte oder Fallback ermitteln
+    const hasIOSNotification = notification && notification.title && notification.body;
     
     // Basis-Datenstruktur für alle Actions
     const baseData = {
@@ -329,16 +338,20 @@ function buildMessage(token, action, childId, childName, childFCMToken, language
     // Action-spezifische Nachrichten
     switch (action) {
         case 'unlock_request':
+            // NEU: iOS-Notification verwenden wenn vorhanden
+            const unlockTitle = hasIOSNotification ? notification.title : 'PauseNow';
+            const unlockBody = hasIOSNotification ? notification.body : `${childName} ${t.unlockRequest}`;
+            
             return {
                 token: token,
                 data: baseData,
                 apns: {
                     payload: {
                         aps: {
-                            "sound": "default",
+                            "sound": notification?.sound || "default",
                             "alert": {
-                                "title": "PauseNow",
-                                "body": `${childName} ${t.unlockRequest}`
+                                "title": unlockTitle,
+                                "body": unlockBody
                             },
                             "critical": 1,
                             "content-available": 1
@@ -348,8 +361,8 @@ function buildMessage(token, action, childId, childName, childFCMToken, language
                 android: {
                     priority: 'high',
                     notification: {
-                        title: "PauseNow",
-                        body: `${childName} ${t.unlockRequest}`
+                        title: unlockTitle,
+                        body: unlockBody
                     },
                     data: baseData
                 }
@@ -357,6 +370,12 @@ function buildMessage(token, action, childId, childName, childFCMToken, language
 
         case 'pause':
         case 'activate':
+            // NEU: iOS-Notification verwenden wenn vorhanden, sonst Backend-Fallback
+            const alertTitle = hasIOSNotification ? notification.title : 'PauseNow';
+            const alertBody = hasIOSNotification ? notification.body : (action === 'pause' ? t.paused : t.activated);
+            const alertSound = notification?.sound || 'default';
+            const alertBadge = notification?.badge !== undefined ? notification.badge : (action === 'pause' ? 1 : 0);
+            
             // WICHTIG: Diese Actions brauchen NotificationServiceExtension!
             return {
                 token: token,
@@ -371,10 +390,11 @@ function buildMessage(token, action, childId, childName, childFCMToken, language
                         aps: {
                             "mutable-content": 1,
                             "content-available": 1,
-                            "sound": "default",
+                            "sound": alertSound,
+                            "badge": alertBadge,
                             "alert": {
-                                "title": "PauseNow",
-                                "body": action === 'pause' ? t.paused : t.activated
+                                "title": alertTitle,
+                                "body": alertBody
                             }
                         },
                         action: action
@@ -382,6 +402,10 @@ function buildMessage(token, action, childId, childName, childFCMToken, language
                 },
                 android: {
                     priority: 'high',
+                    notification: {
+                        title: alertTitle,
+                        body: alertBody
+                    },
                     data: baseData
                 }
             };

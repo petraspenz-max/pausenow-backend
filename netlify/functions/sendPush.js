@@ -197,6 +197,7 @@ exports.handler = async (event, context) => {
         console.log(`Single Token: ${token ? token.substring(0, 20) + '...' : 'NONE'}`);
         console.log(`Multi Tokens: ${tokens ? tokens.length : 0}`);
         console.log(`Language: ${language || 'en (default)'}`);
+        console.log(`ChildName: ${childName || 'NONE'}`);
         // NEU: Log ob iOS notification-Objekt vorhanden
         console.log(`iOS Notification: ${notification ? 'YES (title: ' + notification.title + ')' : 'NO (using fallback)'}`);
         
@@ -338,9 +339,9 @@ function buildMessage(token, action, childId, childName, childFCMToken, language
     // Action-spezifische Nachrichten
     switch (action) {
         case 'unlock_request':
-            // NEU: iOS-Notification verwenden wenn vorhanden
-            const unlockTitle = hasIOSNotification ? notification.title : 'PauseNow';
-            const unlockBody = hasIOSNotification ? notification.body : `${childName} ${t.unlockRequest}`;
+            // WICHTIG: loc-key verwenden damit EMPFÄNGER-Gerät seine Sprache nutzt!
+            // Das ist der Apple-empfohlene Weg für lokalisierte Push-Notifications
+            console.log(`unlock_request: Using loc-key with childName="${childName}"`);
             
             return {
                 token: token,
@@ -348,10 +349,11 @@ function buildMessage(token, action, childId, childName, childFCMToken, language
                 apns: {
                     payload: {
                         aps: {
-                            "sound": notification?.sound || "default",
+                            "sound": "default",
                             "alert": {
-                                "title": unlockTitle,
-                                "body": unlockBody
+                                "title": "PauseNow",
+                                "loc-key": "notification_unlock_request_body",
+                                "loc-args": [childName || "Kind"]
                             },
                             "critical": 1,
                             "content-available": 1
@@ -361,8 +363,8 @@ function buildMessage(token, action, childId, childName, childFCMToken, language
                 android: {
                     priority: 'high',
                     notification: {
-                        title: unlockTitle,
-                        body: unlockBody
+                        title: "PauseNow",
+                        body: `${childName} ${t.unlockRequest}`
                     },
                     data: baseData
                 }

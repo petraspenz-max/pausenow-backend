@@ -370,47 +370,48 @@ function buildMessage(token, action, childId, childName, childFCMToken, language
                 }
             };
 
-        case 'pause':
-        case 'activate':
-            // NEU: iOS-Notification verwenden wenn vorhanden, sonst Backend-Fallback
-            const alertTitle = hasIOSNotification ? notification.title : 'PauseNow';
-            const alertBody = hasIOSNotification ? notification.body : (action === 'pause' ? t.paused : t.activated);
-            const alertSound = notification?.sound || 'default';
-            const alertBadge = notification?.badge !== undefined ? notification.badge : (action === 'pause' ? 1 : 0);
-            
-            // WICHTIG: Diese Actions brauchen NotificationServiceExtension!
-            return {
-                token: token,
-                data: baseData,
-                apns: {
-                    headers: {
-                        'apns-priority': '10',
-                        'apns-push-type': 'alert',
-                        'apns-expiration': String(Math.floor(Date.now() / 1000) + (28 * 24 * 60 * 60))
-                    },
-                    payload: {
-                        aps: {
-                            "mutable-content": 1,
-                            "content-available": 1,
-                            "sound": alertSound,
-                            "badge": alertBadge,
-                            "alert": {
-                                "title": alertTitle,
-                                "body": alertBody
-                            }
-                        },
-                        action: action
+case 'pause':
+case 'activate':
+    // WICHTIG: loc-key verwenden damit EMPFÄNGER-Gerät seine Sprache nutzt!
+    const isPause = action === 'pause';
+    const titleLocKey = isPause ? "notification_pause_title" : "notification_activate_title";
+    const bodyLocKey = isPause ? "notification_pause_body" : "notification_activate_body";
+    const alertBadge = isPause ? 1 : 0;
+    
+    console.log(`${action}: Using loc-key "${titleLocKey}" / "${bodyLocKey}"`);
+    
+    return {
+        token: token,
+        data: baseData,
+        apns: {
+            headers: {
+                'apns-priority': '10',
+                'apns-push-type': 'alert',
+                'apns-expiration': String(Math.floor(Date.now() / 1000) + (28 * 24 * 60 * 60))
+            },
+            payload: {
+                aps: {
+                    "mutable-content": 1,
+                    "content-available": 1,
+                    "sound": "default",
+                    "badge": alertBadge,
+                    "alert": {
+                        "title-loc-key": titleLocKey,
+                        "loc-key": bodyLocKey
                     }
                 },
-                android: {
-                    priority: 'high',
-                    notification: {
-                        title: alertTitle,
-                        body: alertBody
-                    },
-                    data: baseData
-                }
-            };
+                action: action
+            }
+        },
+        android: {
+            priority: 'high',
+            notification: {
+                title: isPause ? t.paused : t.activated,
+                body: isPause ? "You can make phone calls!" : "You can use all apps!"
+            },
+            data: baseData
+        }
+    };
 
         default:
             // Silent Push für alle anderen Actions

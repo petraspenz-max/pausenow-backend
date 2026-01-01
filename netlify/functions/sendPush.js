@@ -412,6 +412,33 @@ case 'activate':
             data: baseData
         }
     };
+case 'ping':
+            // Silent Ping an Kind - testet ob Notifications AN sind
+            return {
+                token: token,
+                data: {
+                    ...baseData,
+                    pingId: Date.now().toString()
+                },
+                apns: {
+                    headers: {
+                        'apns-priority': '10',
+                        'apns-push-type': 'alert'
+                    },
+                    payload: {
+                        aps: {
+                            "mutable-content": 1,
+                            "content-available": 1
+                        },
+                        action: 'ping',
+                        pingId: Date.now().toString()
+                    }
+                },
+                android: {
+                    priority: 'high',
+                    data: baseData
+                }
+            };
 
         default:
             // Silent Push für alle anderen Actions

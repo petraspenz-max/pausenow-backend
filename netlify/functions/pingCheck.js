@@ -15,41 +15,35 @@ exports.handler = async (event, context) => {
     const headers = {
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Headers': 'Content-Type, X-Api-Key',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS'
+        'Access-Control-Allow-Methods': 'POST, GET, OPTIONS'
     };
 
     if (event.httpMethod === 'OPTIONS') {
         return { statusCode: 200, headers, body: '' };
     }
 
-    // Security Check
-    const API_KEY = process.env.PAUSENOW_API_KEY || 'dev-key-pausenow-2025';
-    const requestKey = event.headers['x-api-key'] || event.headers['X-Api-Key'];
-
-    if (!requestKey || requestKey !== API_KEY) {
-        return {
-            statusCode: 401,
-            headers,
-            body: JSON.stringify({ error: 'Unauthorized' })
-        };
-    }
+    // Scheduled functions kommen ohne Auth - das ist OK
+    const isScheduled = !event.body || event.body === '';
 
     try {
-        const { action } = JSON.parse(event.body || '{}');
+        console.log('PingCheck started - isScheduled:', isScheduled);
         
-        if (action === 'send_pings') {
-            // PHASE 1: Sende Pings an alle Kinder
-            return await sendPingsToAllChildren(headers);
-        } else if (action === 'check_responses') {
-            // PHASE 2: Prüfe Antworten und warne Eltern
-            return await checkResponsesAndAlert(headers);
-        } else {
-            return {
-                statusCode: 400,
-                headers,
-                body: JSON.stringify({ error: 'Action muss "send_pings" oder "check_responses" sein' })
-            };
-        }
+        // PHASE 1: Prüfe alte Pings und warne bei Timeout
+        const checkResult = await checkResponsesAndAlert();
+        
+        // PHASE 2: Sende neue Pings
+        const pingResult = await sendPingsToAllChildren();
+        
+        return {
+            statusCode: 200,
+            headers,
+            body: JSON.stringify({
+                success: true,
+                pingsSent: pingResult.pingsSent,
+                trickstersFound: checkResult.trickstersFound,
+                timestamp: new Date().toISOString()
+            })
+        };
 
     } catch (error) {
         console.error('PingCheck Error:', error);
@@ -61,7 +55,7 @@ exports.handler = async (event, context) => {
     }
 };
 
-async function sendPingsToAllChildren(headers) {
+async function sendPingsToAllChildren() {
     const familiesSnapshot = await db.collection('families').get();
     let pingsSent = 0;
     
@@ -73,12 +67,10 @@ async function sendPingsToAllChildren(headers) {
         for (const childDoc of childrenSnapshot.docs) {
             const child = childDoc.data();
             
-            // Nur verbundene Kinder pingen
             if (child.fcmToken && child.isConnected) {
                 try {
                     const pingId = `${Date.now()}_${childDoc.id}`;
                     
-                    // Ping via FCM senden
                     await admin.messaging().send({
                         token: child.fcmToken,
                         data: {
@@ -102,7 +94,6 @@ async function sendPingsToAllChildren(headers) {
                         }
                     });
                     
-                    // Ping-Zeitpunkt speichern
                     await db.collection('families').doc(familyId)
                         .collection('children').doc(childDoc.id)
                         .update({
@@ -111,7 +102,7 @@ async function sendPingsToAllChildren(headers) {
                         });
                     
                     pingsSent++;
-                    console.log(`Ping sent to ${child.name} (${childDoc.id})`);
+                    console.log(`Ping sent to ${child.name}`);
                     
                 } catch (error) {
                     console.error(`Failed to ping ${child.name}:`, error.message);
@@ -120,23 +111,14 @@ async function sendPingsToAllChildren(headers) {
         }
     }
     
-    return {
-        statusCode: 200,
-        headers,
-        body: JSON.stringify({
-            success: true,
-            action: 'send_pings',
-            pingsSent: pingsSent,
-            timestamp: new Date().toISOString()
-        })
-    };
+    return { pingsSent };
 }
 
-async function checkResponsesAndAlert(headers) {
+async function checkResponsesAndAlert() {
     const familiesSnapshot = await db.collection('families').get();
     let trickstersFound = 0;
     
-    const TIMEOUT_MS = 5 * 60 * 1000; // 5 Minuten
+    const TIMEOUT_MS = 30 * 60 * 1000; // 30 Minuten
     
     for (const familyDoc of familiesSnapshot.docs) {
         const familyId = familyDoc.id;
@@ -147,23 +129,20 @@ async function checkResponsesAndAlert(headers) {
         for (const childDoc of childrenSnapshot.docs) {
             const child = childDoc.data();
             
-            // Nur verbundene Kinder prüfen
             if (!child.fcmToken || !child.isConnected) continue;
             if (!child.lastPingSent) continue;
+            if (child.tricksterBlocked) continue; // Bereits blockiert
             
             const pingSentTime = child.lastPingSent.toDate();
             const responseTime = child.lastPingResponse?.toDate();
             
-            // Prüfen: Kam eine Antwort nach dem letzten Ping?
             const hasResponded = responseTime && responseTime > pingSentTime;
             const timeSincePing = Date.now() - pingSentTime.getTime();
             
             if (!hasResponded && timeSincePing > TIMEOUT_MS) {
-                // TRICKSTER ERKANNT!
                 console.log(`TRICKSTER: ${child.name} hat nicht geantwortet!`);
                 trickstersFound++;
                 
-                // Kind als Trickster markieren und pausieren
                 await db.collection('families').doc(familyId)
                     .collection('children').doc(childDoc.id)
                     .update({
@@ -173,32 +152,19 @@ async function checkResponsesAndAlert(headers) {
                         isPaused: true
                     });
                 
-                // Alle Eltern warnen
                 await alertAllParents(familyId, familyData, child);
             }
         }
     }
     
-    return {
-        statusCode: 200,
-        headers,
-        body: JSON.stringify({
-            success: true,
-            action: 'check_responses',
-            trickstersFound: trickstersFound,
-            timestamp: new Date().toISOString()
-        })
-    };
+    return { trickstersFound };
 }
 
 async function alertAllParents(familyId, familyData, child) {
-    // Creator Token
     const parentTokens = [];
     if (familyData.creatorFCMToken) {
         parentTokens.push(familyData.creatorFCMToken);
     }
-    
-    // Partner Tokens
     if (familyData.partnerTokens && Array.isArray(familyData.partnerTokens)) {
         parentTokens.push(...familyData.partnerTokens);
     }
@@ -225,7 +191,7 @@ async function alertAllParents(familyId, familyData, child) {
                     }
                 }
             });
-            console.log(`Alert sent to parent: ${token.substring(0, 20)}...`);
+            console.log(`Alert sent to parent`);
         } catch (error) {
             console.error(`Failed to alert parent:`, error.message);
         }

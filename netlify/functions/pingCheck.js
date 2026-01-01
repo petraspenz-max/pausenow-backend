@@ -118,7 +118,9 @@ async function checkResponsesAndAlert() {
     const familiesSnapshot = await db.collection('families').get();
     let trickstersFound = 0;
     
-    const TIMEOUT_MS = 30 * 60 * 1000; // 30 Minuten
+// TEST: 2 Minuten Timeout (später auf 30 Minuten ändern!)
+    const TIMEOUT_MS = 2 * 60 * 1000; // 2 Minuten für Test
+    // PRODUKTION: const TIMEOUT_MS = 30 * 60 * 1000; // 30 Minuten
     
     for (const familyDoc of familiesSnapshot.docs) {
         const familyId = familyDoc.id;

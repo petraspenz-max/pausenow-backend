@@ -165,12 +165,21 @@ async function checkResponsesAndAlert() {
 
 async function alertAllParents(familyId, familyData, child) {
     const parentTokens = [];
+    
+    // parentTokens Array (deine Struktur)
+    if (familyData.parentTokens && Array.isArray(familyData.parentTokens)) {
+        parentTokens.push(...familyData.parentTokens);
+    }
+    
+    // Fallback für alte Struktur
     if (familyData.creatorFCMToken) {
         parentTokens.push(familyData.creatorFCMToken);
     }
     if (familyData.partnerTokens && Array.isArray(familyData.partnerTokens)) {
         parentTokens.push(...familyData.partnerTokens);
     }
+    
+    console.log(`Alerting ${parentTokens.length} parents for ${child.name}`);
     
     for (const token of parentTokens) {
         try {

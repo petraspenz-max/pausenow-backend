@@ -148,11 +148,12 @@ async function checkResponsesAndAlert() {
                 await db.collection('families').doc(familyId)
                     .collection('children').doc(childDoc.id)
                     .update({
-                        tricksterBlocked: true,
-                        tricksterBlockedAt: admin.firestore.FieldValue.serverTimestamp(),
-                        isResponding: false,
-                        isPaused: true
-                    });
+    tricksterBlocked: true,
+    tricksterBlockedAt: admin.firestore.FieldValue.serverTimestamp(),
+    isResponding: false,
+    isPaused: true,
+    isActive: false
+});
                 
                 await alertAllParents(familyId, familyData, child);
             }

@@ -2,4 +2,4 @@
   directory = "netlify/functions"
 
 [functions."pingCheck"]
-  schedule = "*/25 * * * *"
+  schedule = "0 * * * *"

@@ -71,28 +71,27 @@ async function sendPingsToAllChildren() {
                 try {
                     const pingId = `${Date.now()}_${childDoc.id}`;
                     
-                    await admin.messaging().send({
-                        token: child.fcmToken,
-                        data: {
-                            action: 'ping',
-                            pingId: pingId,
-                            timestamp: Date.now().toString()
-                        },
-                        apns: {
-                            headers: {
-                                'apns-priority': '10',
-                                'apns-push-type': 'alert'
-                            },
-                            payload: {
-                                aps: {
-                                    "mutable-content": 1,
-                                    "content-available": 1
-                                },
-                                action: 'ping',
-                                pingId: pingId
+        await admin.messaging().send({
+                token: token,
+                data: {
+                    action: 'trickster_alert',
+                    childId: child.id || '',
+                    childName: child.name || ''
+                },
+                apns: {
+                    payload: {
+                        aps: {
+                            sound: 'default',
+                            badge: 1,
+                            alert: {
+                                title: 'PauseNow',
+                                'loc-key': 'trickster_alert_message',
+                                'loc-args': [child.name || 'Kind']
                             }
                         }
-                    });
+                    }
+                }
+            });
                     
                     await db.collection('families').doc(familyId)
                         .collection('children').doc(childDoc.id)

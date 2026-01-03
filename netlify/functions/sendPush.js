@@ -440,6 +440,35 @@ case 'ping':
                 }
             };
 
+        case 'trickster_alert':
+            // Trickster-Warnung an Eltern
+            console.log(`trickster_alert: Using loc-key with childName="${childName}"`);
+            return {
+                token: token,
+                data: baseData,
+                apns: {
+                    payload: {
+                        aps: {
+                            sound: 'default',
+                            badge: 1,
+                            alert: {
+                                title: 'PauseNow',
+                                'loc-key': 'trickster_alert_message',
+                                'loc-args': [childName || 'Kind']
+                            }
+                        }
+                    }
+                },
+                android: {
+                    priority: 'high',
+                    notification: {
+                        title: 'PauseNow',
+                        body: `${childName} hat versucht die Kontrolle zu umgehen.`
+                    },
+                    data: baseData
+                }
+            };
+
         default:
             // Silent Push für alle anderen Actions
             return {

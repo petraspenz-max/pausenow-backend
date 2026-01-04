@@ -26,13 +26,19 @@ exports.handler = async (event, context) => {
     const isScheduled = !event.body || event.body === '';
 
     try {
-        console.log('PingCheck started - isScheduled:', isScheduled);
+        console.log('=== PINGCHECK STARTED ===');
+        console.log('Time:', new Date().toISOString());
+        console.log('isScheduled:', isScheduled);
         
-        // PHASE 1: Prüfe alte Pings und warne bei Timeout
+        // PHASE 1: Pruefe alte Pings und warne bei Timeout
         const checkResult = await checkResponsesAndAlert();
         
         // PHASE 2: Sende neue Pings
         const pingResult = await sendPingsToAllChildren();
+        
+        console.log('=== PINGCHECK COMPLETE ===');
+        console.log('Pings sent:', pingResult.pingsSent);
+        console.log('Tricksters found:', checkResult.trickstersFound);
         
         return {
             statusCode: 200,
@@ -58,6 +64,7 @@ exports.handler = async (event, context) => {
 async function sendPingsToAllChildren() {
     const familiesSnapshot = await db.collection('families').get();
     let pingsSent = 0;
+    let errors = 0;
     
     for (const familyDoc of familiesSnapshot.docs) {
         const familyId = familyDoc.id;
@@ -66,12 +73,164 @@ async function sendPingsToAllChildren() {
         
         for (const childDoc of childrenSnapshot.docs) {
             const child = childDoc.data();
+            const childId = childDoc.id;
             
-            if (child.fcmToken && child.isConnected) {
-                try {
-                    const pingId = `${Date.now()}_${childDoc.id}`;
+            // Nur Kinder mit Token und Verbindung pingen
+            if (!child.fcmToken || child.fcmToken === '') {
+                continue;
+            }
+            
+            try {
+                const pingId = `${Date.now()}_${childId}`;
+                
+                // KORRIGIERT: Sende PING (nicht trickster_alert!)
+                await admin.messaging().send({
+                    token: child.fcmToken,  // KORRIGIERT: child.fcmToken statt token
+                    data: {
+                        action: 'ping',  // KORRIGIERT: 'ping' statt 'trickster_alert'
+                        pingId: pingId,
+                        childId: childId,
+                        timestamp: Date.now().toString()
+                    },
+                    apns: {
+                        headers: {
+                            'apns-priority': '10',
+                            'apns-push-type': 'alert'
+                        },
+                        payload: {
+                            aps: {
+                                'mutable-content': 1,
+                                'content-available': 1
+                            },
+                            action: 'ping',
+                            pingId: pingId
+                        }
+                    }
+                });
+                
+                // Ping-Zeitstempel in Firestore speichern
+                await db.collection('families').doc(familyId)
+                    .collection('children').doc(childId)
+                    .update({
+                        lastPingSent: admin.firestore.FieldValue.serverTimestamp(),
+                        lastPingId: pingId
+                    });
+                
+                pingsSent++;
+                console.log(`Ping sent to ${child.name || childId}`);
+                
+                // Kleine Verzoegerung zwischen Nachrichten
+                await new Promise(resolve => setTimeout(resolve, 50));
+                
+            } catch (error) {
+                errors++;
+                
+                // Token ungueltig = App geloescht
+                if (error.code === 'messaging/invalid-registration-token' ||
+                    error.code === 'messaging/registration-token-not-registered') {
+                    console.log(`Token invalid for ${child.name || childId} - App deleted`);
                     
-        await admin.messaging().send({
+                    // Markiere als geloescht
+                    await db.collection('families').doc(familyId)
+                        .collection('children').doc(childId)
+                        .update({
+                            isResponding: false,
+                            tokenInvalid: true,
+                            tokenInvalidAt: admin.firestore.FieldValue.serverTimestamp()
+                        });
+                } else {
+                    console.error(`Failed to ping ${child.name || childId}:`, error.message);
+                }
+            }
+        }
+    }
+    
+    return { pingsSent, errors };
+}
+
+async function checkResponsesAndAlert() {
+    const familiesSnapshot = await db.collection('families').get();
+    let trickstersFound = 0;
+    
+    // KORRIGIERT: 3 Minuten Timeout (statt 60 Minuten!)
+    const TIMEOUT_MS = 3 * 60 * 1000; // 3 Minuten
+    
+    for (const familyDoc of familiesSnapshot.docs) {
+        const familyId = familyDoc.id;
+        const familyData = familyDoc.data();
+        const childrenSnapshot = await db.collection('families').doc(familyId)
+            .collection('children').get();
+        
+        for (const childDoc of childrenSnapshot.docs) {
+            const child = childDoc.data();
+            const childId = childDoc.id;
+            
+            // Skip: Kein Token, bereits blockiert, oder kein Ping gesendet
+            if (!child.fcmToken || child.fcmToken === '') continue;
+            if (!child.lastPingSent) continue;
+            if (child.tricksterBlocked) continue;
+            
+            const pingSentTime = child.lastPingSent.toDate();
+            const responseTime = child.lastPingResponse?.toDate();
+            
+            const hasResponded = responseTime && responseTime > pingSentTime;
+            const timeSincePing = Date.now() - pingSentTime.getTime();
+            
+            // TRICKSTER ERKANNT: Keine Antwort nach Timeout
+            if (!hasResponded && timeSincePing > TIMEOUT_MS) {
+                console.log(`=== TRICKSTER DETECTED ===`);
+                console.log(`Child: ${child.name || childId}`);
+                console.log(`Time since ping: ${Math.round(timeSincePing / 1000)}s`);
+                
+                trickstersFound++;
+                
+                // Kind als Trickster markieren und pausieren
+                await db.collection('families').doc(familyId)
+                    .collection('children').doc(childId)
+                    .update({
+                        tricksterBlocked: true,
+                        tricksterBlockedAt: admin.firestore.FieldValue.serverTimestamp(),
+                        tricksterSuspected: true,
+                        isResponding: false,
+                        isPaused: true,
+                        isActive: false
+                    });
+                
+                // Alle Eltern benachrichtigen
+                await alertAllParents(familyId, familyData, child);
+            }
+        }
+    }
+    
+    return { trickstersFound };
+}
+
+async function alertAllParents(familyId, familyData, child) {
+    const parentTokens = [];
+    
+    // parentTokens Array
+    if (familyData.parentTokens && Array.isArray(familyData.parentTokens)) {
+        parentTokens.push(...familyData.parentTokens);
+    }
+    
+    // Fallback fuer alte Struktur
+    if (familyData.creatorFCMToken) {
+        parentTokens.push(familyData.creatorFCMToken);
+    }
+    if (familyData.partnerTokens && Array.isArray(familyData.partnerTokens)) {
+        parentTokens.push(...familyData.partnerTokens);
+    }
+    
+    // Deduplizierung
+    const uniqueTokens = [...new Set(parentTokens)];
+    
+    console.log(`Alerting ${uniqueTokens.length} parents for ${child.name}`);
+    
+    for (const token of uniqueTokens) {
+        if (!token || token === '') continue;
+        
+        try {
+            await admin.messaging().send({
                 token: token,
                 data: {
                     action: 'trickster_alert',
@@ -92,116 +251,7 @@ async function sendPingsToAllChildren() {
                     }
                 }
             });
-                    
-                    await db.collection('families').doc(familyId)
-                        .collection('children').doc(childDoc.id)
-                        .update({
-                            lastPingSent: admin.firestore.FieldValue.serverTimestamp(),
-                            lastPingId: pingId
-                        });
-                    
-                    pingsSent++;
-                    console.log(`Ping sent to ${child.name}`);
-                    
-                } catch (error) {
-                    console.error(`Failed to ping ${child.name}:`, error.message);
-                }
-            }
-        }
-    }
-    
-    return { pingsSent };
-}
-
-async function checkResponsesAndAlert() {
-    const familiesSnapshot = await db.collection('families').get();
-    let trickstersFound = 0;
-    
-// PRODUKTION: 60 Minuten Timeout (entspricht pingCheck-Intervall)
-    const TIMEOUT_MS = 60 * 60 * 1000; // 60 Minuten
-    
-    for (const familyDoc of familiesSnapshot.docs) {
-        const familyId = familyDoc.id;
-        const familyData = familyDoc.data();
-        const childrenSnapshot = await db.collection('families').doc(familyId)
-            .collection('children').get();
-        
-        for (const childDoc of childrenSnapshot.docs) {
-            const child = childDoc.data();
-            
-            if (!child.fcmToken || !child.isConnected) continue;
-            if (!child.lastPingSent) continue;
-            if (child.tricksterBlocked) continue; // Bereits blockiert
-            
-            const pingSentTime = child.lastPingSent.toDate();
-            const responseTime = child.lastPingResponse?.toDate();
-            
-            const hasResponded = responseTime && responseTime > pingSentTime;
-            const timeSincePing = Date.now() - pingSentTime.getTime();
-            
-            if (!hasResponded && timeSincePing > TIMEOUT_MS) {
-                console.log(`TRICKSTER: ${child.name} hat nicht geantwortet!`);
-                trickstersFound++;
-                
-                await db.collection('families').doc(familyId)
-                    .collection('children').doc(childDoc.id)
-                    .update({
-    tricksterBlocked: true,
-    tricksterBlockedAt: admin.firestore.FieldValue.serverTimestamp(),
-    isResponding: false,
-    isPaused: true,
-    isActive: false
-});
-                
-                await alertAllParents(familyId, familyData, child);
-            }
-        }
-    }
-    
-    return { trickstersFound };
-}
-
-async function alertAllParents(familyId, familyData, child) {
-    const parentTokens = [];
-    
-    // parentTokens Array (deine Struktur)
-    if (familyData.parentTokens && Array.isArray(familyData.parentTokens)) {
-        parentTokens.push(...familyData.parentTokens);
-    }
-    
-    // Fallback für alte Struktur
-    if (familyData.creatorFCMToken) {
-        parentTokens.push(familyData.creatorFCMToken);
-    }
-    if (familyData.partnerTokens && Array.isArray(familyData.partnerTokens)) {
-        parentTokens.push(...familyData.partnerTokens);
-    }
-    
-    console.log(`Alerting ${parentTokens.length} parents for ${child.name}`);
-    
-    for (const token of parentTokens) {
-        try {
-            await admin.messaging().send({
-                token: token,
-                notification: {
-                    title: 'PauseNow',
-                    body: `${child.name} hat versucht die Kontrolle zu umgehen und wurde pausiert.`
-                },
-                data: {
-                    action: 'trickster_alert',
-                    childId: child.id || '',
-                    childName: child.name || ''
-                },
-                apns: {
-                    payload: {
-                        aps: {
-                            sound: 'default',
-                            badge: 1
-                        }
-                    }
-                }
-            });
-            console.log(`Alert sent to parent`);
+            console.log(`Trickster alert sent to parent`);
         } catch (error) {
             console.error(`Failed to alert parent:`, error.message);
         }

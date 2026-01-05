@@ -101,7 +101,9 @@ apns: {
         aps: {
             'mutable-content': 1,
             'content-available': 1,
-            alert: ''
+            alert: {
+                body: '\u200B'
+            }
         },
         action: 'ping',
         pingId: pingId

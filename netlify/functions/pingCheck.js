@@ -93,19 +93,22 @@ async function sendPingsToAllChildren() {
                         timestamp: Date.now().toString()
                     },
                     apns: {
-                        headers: {
-                            'apns-priority': '10',
-                            'apns-push-type': 'alert'
-                        },
-                        payload: {
-                            aps: {
-                                'mutable-content': 1,
-                                'content-available': 1
-                            },
-                            action: 'ping',
-                            pingId: pingId
-                        }
-                    }
+    headers: {
+        'apns-priority': '10',
+        'apns-push-type': 'alert'
+    },
+    payload: {
+        aps: {
+            'mutable-content': 1,
+            'content-available': 1,
+            alert: {
+                body: ' '
+            }
+        },
+        action: 'ping',
+        pingId: pingId
+    }
+}
                 });
                 
                 // Ping-Zeitstempel in Firestore speichern

@@ -94,12 +94,14 @@ async function sendPingsToAllChildren() {
                     },
 apns: {
     headers: {
-        'apns-priority': '5',
-        'apns-push-type': 'background'
+        'apns-priority': '10',
+        'apns-push-type': 'alert'
     },
     payload: {
         aps: {
-            'content-available': 1
+            'mutable-content': 1,
+            'content-available': 1,
+            alert: ''
         },
         action: 'ping',
         pingId: pingId

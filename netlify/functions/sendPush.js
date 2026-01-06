@@ -372,7 +372,6 @@ function buildMessage(token, action, childId, childName, childFCMToken, language
 
 case 'pause':
 case 'activate':
-    // WICHTIG: loc-key verwenden damit EMPFÄNGER-Gerät seine Sprache nutzt!
     const isPause = action === 'pause';
     const titleLocKey = isPause ? "notification_pause_title" : "notification_activate_title";
     const bodyLocKey = isPause ? "notification_pause_body" : "notification_activate_body";
@@ -386,13 +385,13 @@ case 'activate':
         apns: {
             headers: {
                 'apns-priority': '10',
-                'apns-push-type': 'alert',
+                'apns-push-type': 'background',  // GEÄNDERT: background statt alert
                 'apns-expiration': String(Math.floor(Date.now() / 1000) + (28 * 24 * 60 * 60))
             },
             payload: {
                 aps: {
-                    "mutable-content": 1,
                     "content-available": 1,
+                    "mutable-content": 1,
                     "sound": "default",
                     "badge": alertBadge,
                     "alert": {

@@ -377,48 +377,21 @@ case 'activate':
     const bodyLocKey = isPause ? "notification_pause_body" : "notification_activate_body";
     const alertBadge = isPause ? 1 : 0;
     
-    console.log(`${action}: Sending DUAL push`);
+    console.log(`${action}: Using loc-key "${titleLocKey}" / "${bodyLocKey}"`);
     
-    // ZUERST: Background Push (weckt App IMMER auf, auch wenn Mitteilungen AUS)
-    try {
-        await admin.messaging().send({
-            token: token,
-            data: baseData,
-            apns: {
-                headers: {
-                    'apns-priority': '10',
-                    'apns-push-type': 'background'
-                },
-                payload: {
-                    aps: {
-                        "content-available": 1
-                    },
-                    action: action,
-                    childId: childId || '',
-                    childName: childName || ''
-                }
-            }
-        });
-        console.log(`Background push sent for ${action}`);
-    } catch (bgError) {
-        console.log(`Background push failed: ${bgError.message}`);
-    }
-    
-    // Kurze Pause zwischen den Pushes
-    await new Promise(resolve => setTimeout(resolve, 100));
-    
-    // DANN: Alert Push (zeigt Notification wenn Mitteilungen AN)
     return {
         token: token,
         data: baseData,
         apns: {
             headers: {
                 'apns-priority': '10',
-                'apns-push-type': 'alert'
+                'apns-push-type': 'alert',
+                'apns-expiration': String(Math.floor(Date.now() / 1000) + (28 * 24 * 60 * 60))
             },
             payload: {
                 aps: {
                     "mutable-content": 1,
+                    "content-available": 1,
                     "sound": "default",
                     "badge": alertBadge,
                     "alert": {

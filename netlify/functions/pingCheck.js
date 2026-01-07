@@ -176,28 +176,23 @@ async function checkResponsesAndAlert() {
             const timeSincePing = Date.now() - pingSentTime.getTime();
             
             // TRICKSTER ERKANNT: Keine Antwort nach Timeout
-            if (!hasResponded && timeSincePing > TIMEOUT_MS) {
-                console.log(`=== TRICKSTER DETECTED ===`);
-                console.log(`Child: ${child.name || childId}`);
-                console.log(`Time since ping: ${Math.round(timeSincePing / 1000)}s`);
-                
-                trickstersFound++;
-                
-                // Kind als Trickster markieren und pausieren
-                await db.collection('families').doc(familyId)
-                    .collection('children').doc(childId)
-                    .update({
-                        tricksterBlocked: true,
-                        tricksterBlockedAt: admin.firestore.FieldValue.serverTimestamp(),
-                        tricksterSuspected: true,
-                        isResponding: false,
-                        isPaused: true,
-                        isActive: false
-                    });
-                
-                // Alle Eltern benachrichtigen
-                await alertAllParents(familyId, familyData, child);
-            }
+if (!hasResponded && timeSincePing > TIMEOUT_MS) {
+    console.log(`=== CHILD OFFLINE DETECTED ===`);
+    console.log(`Child: ${child.name || childId}`);
+    console.log(`Time since ping: ${Math.round(timeSincePing / 1000)}s`);
+    
+    // NUR Offline-Status setzen, NICHT als Trickster markieren!
+    await db.collection('families').doc(familyId)
+        .collection('children').doc(childId)
+        .update({
+            isResponding: false
+            // KEIN tricksterBlocked mehr!
+            // KEIN tricksterSuspected mehr!
+            // KEIN isPaused mehr!
+        });
+    
+    // Keine alertAllParents mehr - Kind ist nur offline, kein Trickster
+}
         }
     }
     

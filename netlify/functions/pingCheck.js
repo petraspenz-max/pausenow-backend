@@ -175,7 +175,7 @@ async function checkResponsesAndAlert() {
             const hasResponded = responseTime && responseTime > pingSentTime;
             const timeSincePing = Date.now() - pingSentTime.getTime();
             
-            // TRICKSTER ERKANNT: Keine Antwort nach Timeout
+// CHILD OFFLINE: Keine Antwort nach Timeout
 if (!hasResponded && timeSincePing > TIMEOUT_MS) {
     console.log(`=== CHILD OFFLINE DETECTED ===`);
     console.log(`Child: ${child.name || childId}`);

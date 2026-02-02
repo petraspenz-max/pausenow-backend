@@ -206,29 +206,39 @@ async function checkResponsesAndAlert() {
                 
                 if (appIsRunning) {
                     // =====================================================
-                    // TRICKSTER: App läuft (lastSeen aktuell), 
+                    // VERDACHT: App läuft (lastSeen aktuell), 
                     // aber Pings kommen nicht an!
-                    // = Mitteilungen sind AUS!
+                    // KÖNNTE Mitteilungen AUS sein, ODER iOS throttelt Pushes
+                    // 
+                    // WICHTIG: Server setzt NUR tricksterSuspected!
+                    // Die EXTENSION auf dem Kind-Gerät entscheidet über
+                    // tricksterBlocked (sie kann lokal prüfen ob 
+                    // Mitteilungen wirklich AUS sind)
                     // =====================================================
-                    console.log(`=== TRICKSTER DETECTED ===`);
+                    console.log(`=== TRICKSTER SUSPECTED ===`);
                     console.log(`Child: ${child.name || childId}`);
                     console.log(`lastSeen: ${lastSeenTime?.toISOString()} (App is running!)`);
                     console.log(`lastPingResponse: ${responseTime?.toISOString() || 'NEVER'}`);
                     console.log(`timeSinceLastResponse: ${Math.round(timeSinceLastResponse / 60000)} minutes`);
-                    console.log(`Reason: App running but no ping response = Notifications OFF`);
+                    console.log(`Reason: App running but no ping response - marking as SUSPECTED (not blocked)`);
                     
-                    await db.collection('families').doc(familyId)
-                        .collection('children').doc(childId)
-                        .update({
-                            isResponding: false,
-                            tricksterBlocked: true,
-                            tricksterBlockedAt: admin.firestore.FieldValue.serverTimestamp(),
-                            isPaused: true,
-                            isActive: false
-                        });
-                    
-                    // Eltern benachrichtigen
-                    await alertAllParents(familyId, familyData, {...child, id: childId});
+                    // NUR suspected setzen - NICHT blocked!
+                    // Die Extension entscheidet über blocked
+                    if (!child.tricksterSuspected) {
+                        await db.collection('families').doc(familyId)
+                            .collection('children').doc(childId)
+                            .update({
+                                isResponding: false,
+                                tricksterSuspected: true,
+                                tricksterSuspectedAt: admin.firestore.FieldValue.serverTimestamp()
+                                // KEIN tricksterBlocked!
+                                // KEIN isPaused/isActive ändern!
+                            });
+                        
+                        // Eltern über VERDACHT informieren (nicht blockieren!)
+                        // await alertAllParents(familyId, familyData, {...child, id: childId});
+                        console.log(`${child.name}: Marked as suspected (extension will verify)`);
+                    }
                     trickstersFound++;
                     
                 } else {

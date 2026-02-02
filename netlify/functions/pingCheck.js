@@ -151,8 +151,10 @@ async function checkResponsesAndAlert() {
     const familiesSnapshot = await db.collection('families').get();
     let trickstersFound = 0;
     
-    // KORRIGIERT: 3 Minuten Timeout (statt 60 Minuten!)
-    const TIMEOUT_MS = 3 * 60 * 1000; // 3 Minuten
+    // Timeout: 6 Minuten ohne Ping-Antwort
+    const PING_TIMEOUT_MS = 6 * 60 * 1000;
+    // App gilt als "laufend" wenn lastSeen < 3 Minuten alt
+    const APP_RUNNING_THRESHOLD_MS = 3 * 60 * 1000;
     
     for (const familyDoc of familiesSnapshot.docs) {
         const familyId = familyDoc.id;
@@ -171,28 +173,64 @@ async function checkResponsesAndAlert() {
             
             const pingSentTime = child.lastPingSent.toDate();
             const responseTime = child.lastPingResponse?.toDate();
+            const lastSeenTime = child.lastSeen?.toDate();
             
             const hasResponded = responseTime && responseTime > pingSentTime;
             const timeSincePing = Date.now() - pingSentTime.getTime();
             
-// CHILD OFFLINE: Keine Antwort nach Timeout
-if (!hasResponded && timeSincePing > TIMEOUT_MS) {
-    console.log(`=== CHILD OFFLINE DETECTED ===`);
-    console.log(`Child: ${child.name || childId}`);
-    console.log(`Time since ping: ${Math.round(timeSincePing / 1000)}s`);
-    
-    // NUR Offline-Status setzen, NICHT als Trickster markieren!
-    await db.collection('families').doc(familyId)
-        .collection('children').doc(childId)
-        .update({
-            isResponding: false
-            // KEIN tricksterBlocked mehr!
-            // KEIN tricksterSuspected mehr!
-            // KEIN isPaused mehr!
-        });
-    
-    // Keine alertAllParents mehr - Kind ist nur offline, kein Trickster
-}
+            // Prüfe ob App läuft (lastSeen ist aktuell)
+            const appIsRunning = lastSeenTime && 
+                (Date.now() - lastSeenTime.getTime() < APP_RUNNING_THRESHOLD_MS);
+            
+            // Keine Antwort nach Timeout?
+            if (!hasResponded && timeSincePing > PING_TIMEOUT_MS) {
+                
+                if (appIsRunning) {
+                    // TRICKSTER: App läuft, aber Pings kommen nicht an!
+                    // = Mitteilungen sind AUS!
+                    console.log(`=== TRICKSTER DETECTED ===`);
+                    console.log(`Child: ${child.name || childId}`);
+                    console.log(`lastSeen: ${lastSeenTime?.toISOString()} (App is running!)`);
+                    console.log(`lastPingResponse: ${responseTime?.toISOString() || 'NEVER'}`);
+                    console.log(`Reason: App running but no ping response = Notifications OFF`);
+                    
+                    await db.collection('families').doc(familyId)
+                        .collection('children').doc(childId)
+                        .update({
+                            isResponding: false,
+                            tricksterBlocked: true,
+                            tricksterBlockedAt: admin.firestore.FieldValue.serverTimestamp(),
+                            isPaused: true,
+                            isActive: false
+                        });
+                    
+                    // Eltern benachrichtigen
+                    await alertAllParents(familyId, familyData, {...child, id: childId});
+                    trickstersFound++;
+                    
+                } else {
+                    // OFFLINE: App läuft nicht oder Kind ist offline
+                    // KEIN Trickster - nur offline markieren
+                    console.log(`=== CHILD OFFLINE ===`);
+                    console.log(`Child: ${child.name || childId}`);
+                    console.log(`lastSeen: ${lastSeenTime?.toISOString() || 'NEVER'} (App not running)`);
+                    console.log(`Reason: App not running or device offline - NOT a trickster`);
+                    
+                    await db.collection('families').doc(familyId)
+                        .collection('children').doc(childId)
+                        .update({
+                            isResponding: false
+                            // KEIN tricksterBlocked!
+                        });
+                }
+            } else if (hasResponded) {
+                // Kind hat geantwortet - alles OK
+                await db.collection('families').doc(familyId)
+                    .collection('children').doc(childId)
+                    .update({
+                        isResponding: true
+                    });
+            }
         }
     }
     

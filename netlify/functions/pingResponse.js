@@ -1,5 +1,4 @@
 const admin = require('firebase-admin');
-
 // Firebase Admin SDK initialisieren
 if (!admin.apps.length) {
     const serviceAccount = JSON.parse(process.env.FIREBASE_PRIVATE_KEY);
@@ -8,20 +7,16 @@ if (!admin.apps.length) {
         projectId: 'pausenow-daae2'
     });
 }
-
 const db = admin.firestore();
-
 exports.handler = async (event, context) => {
     const headers = {
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Headers': 'Content-Type, X-Api-Key',
         'Access-Control-Allow-Methods': 'POST, OPTIONS'
     };
-
     if (event.httpMethod === 'OPTIONS') {
         return { statusCode: 200, headers, body: '' };
     }
-
     if (event.httpMethod !== 'POST') {
         return {
             statusCode: 405,
@@ -29,11 +24,9 @@ exports.handler = async (event, context) => {
             body: JSON.stringify({ error: 'Method not allowed' })
         };
     }
-
     // Security Check
     const API_KEY = process.env.PAUSENOW_API_KEY || 'dev-key-pausenow-2025';
     const requestKey = event.headers['x-api-key'] || event.headers['X-Api-Key'];
-
     if (!requestKey || requestKey !== API_KEY) {
         return {
             statusCode: 401,
@@ -41,10 +34,8 @@ exports.handler = async (event, context) => {
             body: JSON.stringify({ error: 'Unauthorized' })
         };
     }
-
     try {
         const { familyId, childId, respondedAt } = JSON.parse(event.body);
-
         if (!familyId || !childId) {
             return {
                 statusCode: 400,
@@ -52,7 +43,6 @@ exports.handler = async (event, context) => {
                 body: JSON.stringify({ error: 'familyId und childId erforderlich' })
             };
         }
-
         // Ping-Antwort in Firestore speichern
         await db.collection('families').doc(familyId)
             .collection('children').doc(childId)
@@ -61,9 +51,7 @@ exports.handler = async (event, context) => {
                 isResponding: true,
                 tricksterBlocked: false
             });
-
-        console.log(`Ping response from child ${childId} in family ${familyId}`);
-
+        console.logPing response from child ${childId} in family ${familyId});
         return {
             statusCode: 200,
             headers,
@@ -73,7 +61,6 @@ exports.handler = async (event, context) => {
                 timestamp: new Date().toISOString()
             })
         };
-
     } catch (error) {
         console.error('Ping Response Error:', error);
         return {

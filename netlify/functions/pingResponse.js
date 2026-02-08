@@ -66,8 +66,8 @@ exports.handler = async (event, context) => {
                 isResponding: true
             });
 
-        console.log(`Ping response from child ${childId} in family ${familyId}`);
-
+console.log(`Ping response from child ${childId} in family ${familyId}`);
+        
         return {
             statusCode: 200,
             headers,

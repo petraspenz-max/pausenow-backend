@@ -54,20 +54,16 @@ exports.handler = async (event, context) => {
         }
 
         // Ping-Antwort in Firestore speichern
-// WICHTIG: tricksterBlocked wird NICHT zurueckgesetzt!
-        // Nur das Kind-Geraet selbst (nach Einstellungs-Check) oder
-        // die Eltern (per Aktivierung) duerfen tricksterBlocked aendern.
-        // Ein Ping-Response beweist nur, dass die App laeuft - nicht
-        // dass die Einstellungen korrekt sind.
         await db.collection('families').doc(familyId)
             .collection('children').doc(childId)
             .update({
                 lastPingResponse: admin.firestore.FieldValue.serverTimestamp(),
-                isResponding: true
+                isResponding: true,
+                tricksterBlocked: false
             });
 
-console.log(`Ping response from child ${childId} in family ${familyId}`);
-        
+        console.log(`Ping response from child ${childId} in family ${familyId}`);
+
         return {
             statusCode: 200,
             headers,

@@ -151,8 +151,11 @@ async function checkResponsesAndAlert() {
     const familiesSnapshot = await db.collection('families').get();
     let trickstersFound = 0;
     
-    // KORRIGIERT: 3 Minuten Timeout (statt 60 Minuten!)
-    const TIMEOUT_MS = 3 * 60 * 1000; // 3 Minuten
+    // KORRIGIERT: 30 Minuten Timeout
+    // GRUND: iOS drosselt Silent Pushes auf ~3-4/Stunde
+    // Bei 2-Min-Intervall werden die meisten Pings nicht zugestellt
+    // 3 Min war viel zu aggressiv und erzeugte False Positives
+    const TIMEOUT_MS = 30 * 60 * 1000; // 30 Minuten
     
     for (const familyDoc of familiesSnapshot.docs) {
         const familyId = familyDoc.id;

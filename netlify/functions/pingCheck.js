@@ -39,6 +39,7 @@ exports.handler = async (event, context) => {
         console.log('=== PINGCHECK COMPLETE ===');
         console.log('Pings sent:', pingResult.pingsSent);
         console.log('Tricksters found:', checkResult.trickstersFound);
+        console.log('Offline children:', checkResult.offlineChildren);
         
         return {
             statusCode: 200,
@@ -47,6 +48,7 @@ exports.handler = async (event, context) => {
                 success: true,
                 pingsSent: pingResult.pingsSent,
                 trickstersFound: checkResult.trickstersFound,
+                offlineChildren: checkResult.offlineChildren,
                 timestamp: new Date().toISOString()
             })
         };
@@ -85,26 +87,26 @@ async function sendPingsToAllChildren() {
                 
                 // KORRIGIERT: Sende PING (nicht trickster_alert!)
                 await admin.messaging().send({
-                    token: child.fcmToken,  // KORRIGIERT: child.fcmToken statt token
+                    token: child.fcmToken,
                     data: {
-                        action: 'ping',  // KORRIGIERT: 'ping' statt 'trickster_alert'
+                        action: 'ping',
                         pingId: pingId,
                         childId: childId,
                         timestamp: Date.now().toString()
                     },
-apns: {
-    headers: {
-        'apns-priority': '5',
-        'apns-push-type': 'background'
-    },
-    payload: {
-        aps: {
-            'content-available': 1
-        },
-        action: 'ping',
-        pingId: pingId
-    }
-}
+                    apns: {
+                        headers: {
+                            'apns-priority': '5',
+                            'apns-push-type': 'background'
+                        },
+                        payload: {
+                            aps: {
+                                'content-available': 1
+                            },
+                            action: 'ping',
+                            pingId: pingId
+                        }
+                    }
                 });
                 
                 // Ping-Zeitstempel in Firestore speichern
@@ -150,12 +152,18 @@ apns: {
 async function checkResponsesAndAlert() {
     const familiesSnapshot = await db.collection('families').get();
     let trickstersFound = 0;
+    let offlineChildren = 0;
     
-    // KORRIGIERT: 30 Minuten Timeout
-    // GRUND: iOS drosselt Silent Pushes auf ~3-4/Stunde
-    // Bei 2-Min-Intervall werden die meisten Pings nicht zugestellt
-    // 3 Min war viel zu aggressiv und erzeugte False Positives
-    const TIMEOUT_MS = 30 * 60 * 1000; // 30 Minuten
+    // =====================================================
+    // BUILD 25 FIX: Timeout basiert auf LETZTER ANTWORT
+    // nicht auf letztem Ping!
+    // =====================================================
+    
+    // Timeout: 10 Minuten ohne Ping-Antwort = Problem
+    const RESPONSE_TIMEOUT_MS = 10 * 60 * 1000;
+    
+    // App gilt als "laufend" wenn lastSeen < 3 Minuten alt
+    const APP_RUNNING_THRESHOLD_MS = 3 * 60 * 1000;
     
     for (const familyDoc of familiesSnapshot.docs) {
         const familyId = familyDoc.id;
@@ -172,34 +180,101 @@ async function checkResponsesAndAlert() {
             if (!child.lastPingSent) continue;
             if (child.tricksterBlocked) continue;
             
-            const pingSentTime = child.lastPingSent.toDate();
             const responseTime = child.lastPingResponse?.toDate();
+            const lastSeenTime = child.lastSeen?.toDate();
             
-            const hasResponded = responseTime && responseTime > pingSentTime;
-            const timeSincePing = Date.now() - pingSentTime.getTime();
+            // =====================================================
+            // NEU: Zeit seit LETZTER ANTWORT (nicht seit letztem Ping!)
+            // =====================================================
+            const timeSinceLastResponse = responseTime 
+                ? Date.now() - responseTime.getTime() 
+                : Infinity;  // Nie geantwortet = unendlich lange her
             
-// CHILD OFFLINE: Keine Antwort nach Timeout
-if (!hasResponded && timeSincePing > TIMEOUT_MS) {
-    console.log(`=== CHILD OFFLINE DETECTED ===`);
-    console.log(`Child: ${child.name || childId}`);
-    console.log(`Time since ping: ${Math.round(timeSincePing / 1000)}s`);
-    
-    // NUR Offline-Status setzen, NICHT als Trickster markieren!
-    await db.collection('families').doc(familyId)
-        .collection('children').doc(childId)
-        .update({
-            isResponding: false
-            // KEIN tricksterBlocked mehr!
-            // KEIN tricksterSuspected mehr!
-            // KEIN isPaused mehr!
-        });
-    
-    // Keine alertAllParents mehr - Kind ist nur offline, kein Trickster
-}
+            // Prüfe ob App läuft (lastSeen ist aktuell)
+            const appIsRunning = lastSeenTime && 
+                (Date.now() - lastSeenTime.getTime() < APP_RUNNING_THRESHOLD_MS);
+            
+            // Debug-Logging
+            console.log(`--- Checking ${child.name || childId} ---`);
+            console.log(`  lastPingResponse: ${responseTime?.toISOString() || 'NEVER'}`);
+            console.log(`  lastSeen: ${lastSeenTime?.toISOString() || 'NEVER'}`);
+            console.log(`  timeSinceLastResponse: ${Math.round(timeSinceLastResponse / 1000)}s`);
+            console.log(`  appIsRunning: ${appIsRunning}`);
+            
+            // Keine Antwort seit RESPONSE_TIMEOUT?
+            if (timeSinceLastResponse > RESPONSE_TIMEOUT_MS) {
+                
+                if (appIsRunning) {
+                    // =====================================================
+                    // VERDACHT: App läuft (lastSeen aktuell), 
+                    // aber Pings kommen nicht an!
+                    // KÖNNTE Mitteilungen AUS sein, ODER iOS throttelt Pushes
+                    // 
+                    // WICHTIG: Server setzt NUR tricksterSuspected!
+                    // Die EXTENSION auf dem Kind-Gerät entscheidet über
+                    // tricksterBlocked (sie kann lokal prüfen ob 
+                    // Mitteilungen wirklich AUS sind)
+                    // =====================================================
+                    console.log(`=== TRICKSTER SUSPECTED ===`);
+                    console.log(`Child: ${child.name || childId}`);
+                    console.log(`lastSeen: ${lastSeenTime?.toISOString()} (App is running!)`);
+                    console.log(`lastPingResponse: ${responseTime?.toISOString() || 'NEVER'}`);
+                    console.log(`timeSinceLastResponse: ${Math.round(timeSinceLastResponse / 60000)} minutes`);
+                    console.log(`Reason: App running but no ping response - marking as SUSPECTED (not blocked)`);
+                    
+                    // NUR suspected setzen - NICHT blocked!
+                    // Die Extension entscheidet über blocked
+                    if (!child.tricksterSuspected) {
+                        await db.collection('families').doc(familyId)
+                            .collection('children').doc(childId)
+                            .update({
+                                isResponding: false,
+                                tricksterSuspected: true,
+                                tricksterSuspectedAt: admin.firestore.FieldValue.serverTimestamp()
+                                // KEIN tricksterBlocked!
+                                // KEIN isPaused/isActive ändern!
+                            });
+                        
+                        // Eltern über VERDACHT informieren (nicht blockieren!)
+                        // await alertAllParents(familyId, familyData, {...child, id: childId});
+                        console.log(`${child.name}: Marked as suspected (extension will verify)`);
+                    }
+                    trickstersFound++;
+                    
+                } else {
+                    // =====================================================
+                    // OFFLINE: App läuft nicht oder Kind ist offline
+                    // KEIN Trickster - nur offline markieren
+                    // =====================================================
+                    console.log(`=== CHILD OFFLINE ===`);
+                    console.log(`Child: ${child.name || childId}`);
+                    console.log(`lastSeen: ${lastSeenTime?.toISOString() || 'NEVER'} (App not running)`);
+                    console.log(`Reason: App not running or device offline - NOT a trickster`);
+                    
+                    await db.collection('families').doc(familyId)
+                        .collection('children').doc(childId)
+                        .update({
+                            isResponding: false
+                            // KEIN tricksterBlocked!
+                        });
+                    
+                    offlineChildren++;
+                }
+            } else {
+                // Kind hat kürzlich geantwortet - alles OK
+                if (child.isResponding !== true) {
+                    await db.collection('families').doc(familyId)
+                        .collection('children').doc(childId)
+                        .update({
+                            isResponding: true
+                        });
+                    console.log(`${child.name || childId}: Responding OK`);
+                }
+            }
         }
     }
     
-    return { trickstersFound };
+    return { trickstersFound, offlineChildren };
 }
 
 async function alertAllParents(familyId, familyData, child) {

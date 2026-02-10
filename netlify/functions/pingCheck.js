@@ -225,38 +225,16 @@ async function checkResponsesAndAlert() {
                     console.log(`timeSinceLastResponse: ${Math.round(timeSinceLastResponse / 60000)} minutes`);
                     console.log(`Reason: App running but no ping response - marking as SUSPECTED (not blocked)`);
                     
-                    // Server setzt tricksterBlocked DIREKT!
-                    // Kind hat kein Internet oder Notifications sind aus -
-                    // es kann Firebase nicht selbst erreichen.
-                    // Server ist das einzige Sicherheitsnetz.
-                    // Zaehler fuer verpasste Pings erhoehen
-                    const missedCount = (child.missedPingCount || 0) + 1;
-                    
+// Server kann NICHT zwischen iOS-Throttling und
+                    // echtem Trickster unterscheiden!
+                    // NUR isResponding tracken - KEIN tricksterBlocked!
                     await db.collection('families').doc(familyId)
                         .collection('children').doc(childId)
                         .update({
-                            isResponding: false,
-                            missedPingCount: missedCount
+                            isResponding: false
                         });
                     
-                    console.log(`${child.name}: Missed ping #${missedCount}`);
-                    
-                    // Erst nach 3 verpassten Pings (= ca. 6 Minuten) blockieren
-                    // Verhindert False Positives durch iOS Push-Throttling
-                    if (missedCount >= 3 && !child.tricksterBlocked) {
-                        await db.collection('families').doc(familyId)
-                            .collection('children').doc(childId)
-                            .update({
-                                tricksterBlocked: true,
-                                tricksterBlockedAt: admin.firestore.FieldValue.serverTimestamp(),
-                                isActive: false,
-                                isPaused: true
-                            });
-                        
-                        // Eltern sofort informieren!
-                        await alertAllParents(familyId, familyData, {...child, id: childId});
-                        console.log(`${child.name}: TRICKSTER BLOCKED by server after ${missedCount} missed pings`);
-                    }
+                    console.log(`${child.name}: Not responding (iOS may be throttling pushes)`);
                     trickstersFound++;
                     
                 } else {

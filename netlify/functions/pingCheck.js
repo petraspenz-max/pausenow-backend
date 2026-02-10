@@ -222,22 +222,24 @@ async function checkResponsesAndAlert() {
                     console.log(`timeSinceLastResponse: ${Math.round(timeSinceLastResponse / 60000)} minutes`);
                     console.log(`Reason: App running but no ping response - marking as SUSPECTED (not blocked)`);
                     
-                    // NUR suspected setzen - NICHT blocked!
-                    // Die Extension entscheidet über blocked
-                    if (!child.tricksterSuspected) {
+                    // Server setzt tricksterBlocked DIREKT!
+                    // Kind hat kein Internet oder Notifications sind aus -
+                    // es kann Firebase nicht selbst erreichen.
+                    // Server ist das einzige Sicherheitsnetz.
+                    if (!child.tricksterBlocked) {
                         await db.collection('families').doc(familyId)
                             .collection('children').doc(childId)
                             .update({
                                 isResponding: false,
-                                tricksterSuspected: true,
-                                tricksterSuspectedAt: admin.firestore.FieldValue.serverTimestamp()
-                                // KEIN tricksterBlocked!
-                                // KEIN isPaused/isActive ändern!
+                                tricksterBlocked: true,
+                                tricksterBlockedAt: admin.firestore.FieldValue.serverTimestamp(),
+                                isActive: false,
+                                isPaused: true
                             });
                         
-                        // Eltern über VERDACHT informieren (nicht blockieren!)
-                        // await alertAllParents(familyId, familyData, {...child, id: childId});
-                        console.log(`${child.name}: Marked as suspected (extension will verify)`);
+                        // Eltern sofort informieren!
+                        await alertAllParents(familyId, familyData, {...child, id: childId});
+                        console.log(`${child.name}: TRICKSTER BLOCKED by server + parents alerted`);
                     }
                     trickstersFound++;
                     
@@ -255,19 +257,23 @@ async function checkResponsesAndAlert() {
                         .collection('children').doc(childId)
                         .update({
                             isResponding: false
-                            // KEIN tricksterBlocked!
+                            // Offline = KEIN Trickster, nur nicht erreichbar
                         });
                     
                     offlineChildren++;
                 }
             } else {
-                // Kind hat kürzlich geantwortet - alles OK
+                // Kind antwortet - aufraeumen
+                const updateFields = { isResponding: true };
+                
+                // Falls Server vorher tricksterBlocked gesetzt hat
+                // aber Kind jetzt wieder antwortet: NICHT automatisch aufheben!
+                // Nur Mutter darf aktivieren (via toggleChild)
+                
                 if (child.isResponding !== true) {
                     await db.collection('families').doc(familyId)
                         .collection('children').doc(childId)
-                        .update({
-                            isResponding: true
-                        });
+                        .update(updateFields);
                     console.log(`${child.name || childId}: Responding OK`);
                 }
             }

@@ -175,10 +175,13 @@ async function checkResponsesAndAlert() {
             const child = childDoc.data();
             const childId = childDoc.id;
             
-            // Skip: Kein Token, bereits blockiert, oder kein Ping gesendet
+// Skip: Kein Token, bereits blockiert, oder kein Ping gesendet
             if (!child.fcmToken || child.fcmToken === '') continue;
             if (!child.lastPingSent) continue;
             if (child.tricksterBlocked) continue;
+            
+            // Kind ist bereits pausiert (von Mutter) - kein Trickster-Check noetig
+            if (child.isActive === false) continue;
             
             const responseTime = child.lastPingResponse?.toDate();
             const lastSeenTime = child.lastSeen?.toDate();
@@ -226,11 +229,24 @@ async function checkResponsesAndAlert() {
                     // Kind hat kein Internet oder Notifications sind aus -
                     // es kann Firebase nicht selbst erreichen.
                     // Server ist das einzige Sicherheitsnetz.
-                    if (!child.tricksterBlocked) {
+                    // Zaehler fuer verpasste Pings erhoehen
+                    const missedCount = (child.missedPingCount || 0) + 1;
+                    
+                    await db.collection('families').doc(familyId)
+                        .collection('children').doc(childId)
+                        .update({
+                            isResponding: false,
+                            missedPingCount: missedCount
+                        });
+                    
+                    console.log(`${child.name}: Missed ping #${missedCount}`);
+                    
+                    // Erst nach 3 verpassten Pings (= ca. 6 Minuten) blockieren
+                    // Verhindert False Positives durch iOS Push-Throttling
+                    if (missedCount >= 3 && !child.tricksterBlocked) {
                         await db.collection('families').doc(familyId)
                             .collection('children').doc(childId)
                             .update({
-                                isResponding: false,
                                 tricksterBlocked: true,
                                 tricksterBlockedAt: admin.firestore.FieldValue.serverTimestamp(),
                                 isActive: false,
@@ -239,7 +255,7 @@ async function checkResponsesAndAlert() {
                         
                         // Eltern sofort informieren!
                         await alertAllParents(familyId, familyData, {...child, id: childId});
-                        console.log(`${child.name}: TRICKSTER BLOCKED by server + parents alerted`);
+                        console.log(`${child.name}: TRICKSTER BLOCKED by server after ${missedCount} missed pings`);
                     }
                     trickstersFound++;
                     
@@ -264,8 +280,10 @@ async function checkResponsesAndAlert() {
                 }
             } else {
                 // Kind antwortet - aufraeumen
-                const updateFields = { isResponding: true };
-                
+const updateFields = { 
+                    isResponding: true,
+                    missedPingCount: 0
+                };                
                 // Falls Server vorher tricksterBlocked gesetzt hat
                 // aber Kind jetzt wieder antwortet: NICHT automatisch aufheben!
                 // Nur Mutter darf aktivieren (via toggleChild)

@@ -48,6 +48,7 @@ await db.collection('families').doc(familyId)
             .collection('children').doc(childId)
             .update({
                 lastPingResponse: admin.firestore.FieldValue.serverTimestamp(),
+                lastSeen: admin.firestore.FieldValue.serverTimestamp(),
                 isResponding: true
             });
         console.logPing response from child ${childId} in family ${familyId});

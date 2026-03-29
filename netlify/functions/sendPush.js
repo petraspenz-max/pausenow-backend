@@ -183,8 +183,8 @@ exports.handler = async (event, context) => {
         
         // BESTEHENDER CODE für normale Push-Nachrichten
         // NEU: notification-Objekt aus iOS-Payload extrahieren
-        const { token, action, childId, childName, childFCMToken, tokens, language, notification } = requestBody;
-
+const { token, action, childId, childName, childFCMToken, tokens, language, notification, senderToken } = requestBody;
+        
         if ((!token && !tokens) || !action) {
             return {
                 statusCode: 400,
@@ -333,6 +333,7 @@ function buildMessage(token, action, childId, childName, childFCMToken, language
         childId: childId || '',
         childName: childName || '',
         childFCMToken: childFCMToken || '',
+        senderToken: senderToken || '',
         timestamp: Date.now().toString()
     };
 

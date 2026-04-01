@@ -183,8 +183,8 @@ exports.handler = async (event, context) => {
         
         // BESTEHENDER CODE für normale Push-Nachrichten
         // NEU: notification-Objekt aus iOS-Payload extrahieren
-        const { token, action, childId, childName, childFCMToken, tokens, language, notification } = requestBody;
-
+const { token, action, childId, childName, childFCMToken, tokens, language, notification, senderToken } = requestBody;
+        
         if ((!token && !tokens) || !action) {
             return {
                 statusCode: 400,
@@ -223,7 +223,7 @@ exports.handler = async (event, context) => {
                 
                 try {
                     // NEU: notification-Objekt an buildMessage übergeben
-                    const message = buildMessage(targetToken, action, childId, childName, childFCMToken, language, notification);
+                    const message = buildMessage(targetToken, action, childId, childName, childFCMToken, language, notification, senderToken)
                     const response = await admin.messaging().send(message);
                     results.push({ 
                         token: targetToken.substring(0, 20), 
@@ -271,7 +271,7 @@ exports.handler = async (event, context) => {
         
         // Single-Parent: Normale Funktionalität (backward compatibility)
         // NEU: notification-Objekt an buildMessage übergeben
-        const message = buildMessage(token, action, childId, childName, childFCMToken, language, notification);
+        const message = buildMessage(token, action, childId, childName, childFCMToken, language, notification, senderToken)
         const response = await admin.messaging().send(message);
         
         console.log(`Single Push sent successfully: ${response}`);
@@ -320,7 +320,7 @@ exports.handler = async (event, context) => {
 };
 
 // NEU: notification-Parameter hinzugefügt
-function buildMessage(token, action, childId, childName, childFCMToken, language, notification) {
+function buildMessage(token, action, childId, childName, childFCMToken, language, notification, senderToken) {
     // Lokalisierte Texte holen (Fallback)
     const t = getTranslation(language);
     
@@ -335,6 +335,12 @@ function buildMessage(token, action, childId, childName, childFCMToken, language
         childFCMToken: childFCMToken || '',
         timestamp: Date.now().toString()
     };
+
+    // senderToken nur hinzufuegen wenn vorhanden
+    // FCM verlangt String-Werte - undefined wuerde ALLE Pushes brechen
+    if (senderToken && typeof senderToken === 'string' && senderToken.length > 0) {
+        baseData.senderToken = senderToken;
+    }
 
     // Action-spezifische Nachrichten
     switch (action) {

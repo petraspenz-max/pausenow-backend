@@ -22,9 +22,37 @@ exports.handler = async (event, context) => {
         return { statusCode: 200, headers, body: '' };
     }
 
+    // Security Check - API Key Authentifizierung
+    // Scheduled Functions von Netlify senden keinen API Key,
+    // daher pruefen wir auf den Scheduled-Event-Header ODER einen gueltigen API Key
+    const isScheduled = event.headers['x-nf-event'] === 'schedule' || 
+                        event.headers['X-Nf-Event'] === 'schedule';
+    
+    if (!isScheduled) {
+        const API_KEY = process.env.PAUSENOW_API_KEY;
+        if (!API_KEY) {
+            console.error('PAUSENOW_API_KEY not configured');
+            return {
+                statusCode: 500,
+                headers,
+                body: JSON.stringify({ error: 'Server configuration error' })
+            };
+        }
+        
+        const requestKey = event.headers['x-api-key'] || event.headers['X-Api-Key'];
+        if (!requestKey || requestKey !== API_KEY) {
+            return {
+                statusCode: 401,
+                headers,
+                body: JSON.stringify({ error: 'Unauthorized' })
+            };
+        }
+    }
+
     try {
         console.log('=== PINGCHECK STARTED ===');
         console.log('Time:', new Date().toISOString());
+        console.log('Triggered by:', isScheduled ? 'Scheduled' : 'API call');
         
         // PHASE 1: Pruefe Antworten auf letzte Pings (isResponding tracken)
         const checkResult = await checkResponses();

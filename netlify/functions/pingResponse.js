@@ -44,14 +44,14 @@ exports.handler = async (event, context) => {
             };
         }
         // Ping-Antwort in Firestore speichern
-await db.collection('families').doc(familyId)
+        await db.collection('families').doc(familyId)
             .collection('children').doc(childId)
             .update({
                 lastPingResponse: admin.firestore.FieldValue.serverTimestamp(),
                 lastSeen: admin.firestore.FieldValue.serverTimestamp(),
                 isResponding: true
             });
-        console.logPing response from child ${childId} in family ${familyId});
+        console.log(`Ping response from child ${childId} in family ${familyId}`);
         return {
             statusCode: 200,
             headers,

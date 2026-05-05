@@ -95,7 +95,7 @@ exports.handler = async (event, context) => {
     try {
         const requestBody = JSON.parse(event.body);
         
-        // NEU: Status Check Action
+        // Status Check Action
         if (requestBody.action === 'status_check') {
             const { token, childId } = requestBody;
             
@@ -182,8 +182,7 @@ exports.handler = async (event, context) => {
         }
         
         // BESTEHENDER CODE für normale Push-Nachrichten
-        // NEU: notification-Objekt aus iOS-Payload extrahieren
-const { token, action, childId, childName, childFCMToken, tokens, language, notification, senderToken } = requestBody;
+        const { token, action, childId, childName, childFCMToken, tokens, language, notification, senderToken } = requestBody;
         
         if ((!token && !tokens) || !action) {
             return {
@@ -198,7 +197,6 @@ const { token, action, childId, childName, childFCMToken, tokens, language, noti
         console.log(`Multi Tokens: ${tokens ? tokens.length : 0}`);
         console.log(`Language: ${language || 'en (default)'}`);
         console.log(`ChildName: ${childName || 'NONE'}`);
-        // NEU: Log ob iOS notification-Objekt vorhanden
         console.log(`iOS Notification: ${notification ? 'YES (title: ' + notification.title + ')' : 'NO (using fallback)'}`);
         
         // Multi-Parent: Wenn tokens Array vorhanden, an alle senden
@@ -211,10 +209,9 @@ const { token, action, childId, childName, childFCMToken, tokens, language, noti
             }
             
             const results = [];
-            const processedTokens = new Set(); // Verhindere doppelte Verarbeitung
+            const processedTokens = new Set();
             
             for (const targetToken of uniqueTokens) {
-                // Skip wenn bereits verarbeitet
                 if (processedTokens.has(targetToken)) {
                     console.log(`Skipping duplicate token: ${targetToken.substring(0, 20)}...`);
                     continue;
@@ -222,7 +219,6 @@ const { token, action, childId, childName, childFCMToken, tokens, language, noti
                 processedTokens.add(targetToken);
                 
                 try {
-                    // NEU: notification-Objekt an buildMessage übergeben
                     const message = buildMessage(targetToken, action, childId, childName, childFCMToken, language, notification, senderToken)
                     const response = await admin.messaging().send(message);
                     results.push({ 
@@ -232,11 +228,9 @@ const { token, action, childId, childName, childFCMToken, tokens, language, noti
                     });
                     console.log(`Multi-Push sent to: ${targetToken.substring(0, 20)}...`);
                     
-                    // Kleine Verzögerung zwischen Nachrichten (verhindert Rate-Limiting)
                     await new Promise(resolve => setTimeout(resolve, 50));
                     
                 } catch (error) {
-                    // NEU: FCM Error Codes auswerten für "App gelöscht"
                     if (error.code === 'messaging/invalid-registration-token' ||
                         error.code === 'messaging/registration-token-not-registered') {
                         results.push({ 
@@ -270,7 +264,6 @@ const { token, action, childId, childName, childFCMToken, tokens, language, noti
         }
         
         // Single-Parent: Normale Funktionalität (backward compatibility)
-        // NEU: notification-Objekt an buildMessage übergeben
         const message = buildMessage(token, action, childId, childName, childFCMToken, language, notification, senderToken)
         const response = await admin.messaging().send(message);
         
@@ -289,13 +282,12 @@ const { token, action, childId, childName, childFCMToken, tokens, language, noti
         console.error('Push Error:', error);
         console.error('Error Code:', error.code);
         
-        // NEU: FCM Error Codes auswerten
         if (error.code === 'messaging/invalid-registration-token' ||
             error.code === 'messaging/registration-token-not-registered') {
             
             console.log('Token ungültig - App wurde gelöscht');
             return {
-                statusCode: 200,  // WICHTIG: 200, nicht 500!
+                statusCode: 200,
                 headers,
                 body: JSON.stringify({ 
                     success: false,
@@ -306,7 +298,6 @@ const { token, action, childId, childName, childFCMToken, tokens, language, noti
             };
         }
         
-        // Bei anderen Fehlern: 500 wie bisher
         return {
             statusCode: 500,
             headers,
@@ -319,12 +310,10 @@ const { token, action, childId, childName, childFCMToken, tokens, language, noti
     }
 };
 
-// NEU: notification-Parameter hinzugefügt
 function buildMessage(token, action, childId, childName, childFCMToken, language, notification, senderToken) {
     // Lokalisierte Texte holen (Fallback)
     const t = getTranslation(language);
     
-    // NEU: iOS-Notification-Werte oder Fallback ermitteln
     const hasIOSNotification = notification && notification.title && notification.body;
     
     // Basis-Datenstruktur für alle Actions
@@ -337,7 +326,6 @@ function buildMessage(token, action, childId, childName, childFCMToken, language
     };
 
     // senderToken nur hinzufuegen wenn vorhanden
-    // FCM verlangt String-Werte - undefined wuerde ALLE Pushes brechen
     if (senderToken && typeof senderToken === 'string' && senderToken.length > 0) {
         baseData.senderToken = senderToken;
     }
@@ -345,8 +333,6 @@ function buildMessage(token, action, childId, childName, childFCMToken, language
     // Action-spezifische Nachrichten
     switch (action) {
         case 'unlock_request':
-            // WICHTIG: loc-key verwenden damit EMPFÄNGER-Gerät seine Sprache nutzt!
-            // Das ist der Apple-empfohlene Weg für lokalisierte Push-Notifications
             console.log(`unlock_request: Using loc-key with childName="${childName}"`);
             
             return {
@@ -376,49 +362,79 @@ function buildMessage(token, action, childId, childName, childFCMToken, language
                 }
             };
 
-case 'pause':
-case 'activate':
-    const isPause = action === 'pause';
-    const titleLocKey = isPause ? "notification_pause_title" : "notification_activate_title";
-    const bodyLocKey = isPause ? "notification_pause_body" : "notification_activate_body";
-    const alertBadge = isPause ? 1 : 0;
-    
-    console.log(`${action}: Using loc-key "${titleLocKey}" / "${bodyLocKey}"`);
-    
-    return {
-        token: token,
-        data: baseData,
-        apns: {
-            headers: {
-                'apns-priority': '10',
-                'apns-push-type': 'alert',
-                'apns-expiration': String(Math.floor(Date.now() / 1000) + (28 * 24 * 60 * 60))
-            },
-            payload: {
-                aps: {
-                    "mutable-content": 1,
-                    "content-available": 1,
-                    "sound": "default",
-                    "badge": alertBadge,
-                    "alert": {
-                        "title-loc-key": titleLocKey,
-                        "loc-key": bodyLocKey
+        case 'pause':
+        case 'activate':
+            const isPause = action === 'pause';
+            const titleLocKey = isPause ? "notification_pause_title" : "notification_activate_title";
+            const bodyLocKey = isPause ? "notification_pause_body" : "notification_activate_body";
+            const alertBadge = isPause ? 1 : 0;
+            
+            console.log(`${action}: Using loc-key "${titleLocKey}" / "${bodyLocKey}"`);
+            
+            return {
+                token: token,
+                data: baseData,
+                apns: {
+                    headers: {
+                        'apns-priority': '10',
+                        'apns-push-type': 'alert',
+                        'apns-expiration': String(Math.floor(Date.now() / 1000) + (28 * 24 * 60 * 60))
+                    },
+                    payload: {
+                        aps: {
+                            "mutable-content": 1,
+                            "content-available": 1,
+                            "sound": "default",
+                            "badge": alertBadge,
+                            "alert": {
+                                "title-loc-key": titleLocKey,
+                                "loc-key": bodyLocKey
+                            }
+                        },
+                        action: action
                     }
                 },
-                action: action
-            }
-        },
-        android: {
-            priority: 'high',
-            notification: {
-                title: isPause ? t.paused : t.activated,
-                body: isPause ? "You can make phone calls!" : "You can use all apps!"
-            },
-            data: baseData
-        }
-    };
-case 'ping':
-            // Silent Ping an Kind - testet ob Notifications AN sind
+                android: {
+                    priority: 'high',
+                    notification: {
+                        title: isPause ? t.paused : t.activated,
+                        body: isPause ? "You can make phone calls!" : "You can use all apps!"
+                    },
+                    data: baseData
+                }
+            };
+
+        // Build 143: pause_confirmed und activate_confirmed als alert-push
+        // mit content-available, ohne sichtbare notification.
+        // Loest Phantom-Offline-Bug: silent pushes wurden im Background gedrosselt.
+        case 'pause_confirmed':
+        case 'activate_confirmed':
+            console.log(`${action}: Reliable background-wake push (Build 143)`);
+            
+            return {
+                token: token,
+                data: baseData,
+                apns: {
+                    headers: {
+                        'apns-priority': '10',
+                        'apns-push-type': 'alert',
+                        'apns-expiration': String(Math.floor(Date.now() / 1000) + (5 * 60))
+                    },
+                    payload: {
+                        aps: {
+                            "mutable-content": 1,
+                            "content-available": 1
+                        },
+                        action: action
+                    }
+                },
+                android: {
+                    priority: 'high',
+                    data: baseData
+                }
+            };
+
+        case 'ping':
             return {
                 token: token,
                 data: {
@@ -446,7 +462,6 @@ case 'ping':
             };
 
         case 'trickster_alert':
-            // Trickster-Warnung an Eltern
             console.log(`trickster_alert: Using loc-key with childName="${childName}"`);
             return {
                 token: token,

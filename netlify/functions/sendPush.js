@@ -342,6 +342,7 @@ function buildMessage(token, action, childId, childName, childFCMToken, language
                     payload: {
                         aps: {
                             "sound": "default",
+                            "badge": 1,
                             "alert": {
                                 "title": "PauseNow",
                                 "loc-key": "notification_unlock_request_body",

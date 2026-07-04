@@ -35,7 +35,7 @@ exports.handler = async (event, context) => {
         };
     }
     try {
-        const { familyId, childId, respondedAt } = JSON.parse(event.body);
+        const { familyId, childId, respondedAt, permissionOK } = JSON.parse(event.body);
         if (!familyId || !childId) {
             return {
                 statusCode: 400,
@@ -44,13 +44,20 @@ exports.handler = async (event, context) => {
             };
         }
         // Ping-Antwort in Firestore speichern
+        const updateData = {
+            lastPingResponse: admin.firestore.FieldValue.serverTimestamp(),
+            lastSeen: admin.firestore.FieldValue.serverTimestamp(),
+            isResponding: true
+        };
+        // Build 179: permissionOK nur schreiben, wenn im Payload enthalten
+        // (alte NSE-Versionen senden es nicht -> Feld unangetastet lassen).
+        if (typeof permissionOK === 'boolean') {
+            updateData.permissionOK = permissionOK;
+        }
         await db.collection('families').doc(familyId)
             .collection('children').doc(childId)
-            .update({
-                lastPingResponse: admin.firestore.FieldValue.serverTimestamp(),
-                lastSeen: admin.firestore.FieldValue.serverTimestamp(),
-                isResponding: true
-            });
+            .update(updateData);
+        
         console.log(`Ping response from child ${childId} in family ${familyId}`);
         return {
             statusCode: 200,

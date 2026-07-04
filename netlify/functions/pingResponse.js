@@ -9,11 +9,7 @@ if (!admin.apps.length) {
 }
 const db = admin.firestore();
 
-// Build 180: Alert-Push an die Eltern, wenn die Bildschirmzeit-Freigabe beim Kind fehlt.
-// Format gespiegelt von sendPush.js (trickster_alert): sichtbarer Alert, loc-key -> iOS
-// uebersetzt on-device via Localizable. Direkter Versand (kein zweiter Funktions-Hop),
-// damit die Warnung nicht an einer anderen Funktion haengt.
-// Rueckgabe: true, sobald mind. ein Push zugestellt wurde.
+// Build 181 (Fix): Alert-Push an die Eltern, wenn die Bildschirmzeit-Freigabe fehlt.
 async function sendPermissionLostPush(parentTokens, childId, childName) {
     let anySuccess = false;
     for (const token of parentTokens) {
@@ -103,12 +99,12 @@ exports.handler = async (event, context) => {
         const childRef = db.collection('families').doc(familyId)
             .collection('children').doc(childId);
 
-        // Build 180: aktuellen Stand lesen (Eltern-Tokens, Name, Dedup-Flag)
+        // Aktuellen Stand lesen (Eltern-Tokens, Name, vorheriger permissionOK)
         const snap = await childRef.get();
         const cur = snap.exists ? snap.data() : {};
-        const wasAlertActive = cur.permissionAlertActive === true;
         const parentTokens = Array.isArray(cur.connectedParentTokens) ? cur.connectedParentTokens : [];
         const childName = cur.name || 'Kind';
+        const prevPermissionOK = cur.permissionOK;  // true | false | undefined
 
         // Ping-Antwort in Firestore speichern
         const updateData = {
@@ -116,26 +112,19 @@ exports.handler = async (event, context) => {
             lastSeen: admin.firestore.FieldValue.serverTimestamp(),
             isResponding: true
         };
-        // Build 179: permissionOK nur schreiben, wenn im Payload enthalten
-        // (alte NSE-Versionen senden es nicht -> Feld unangetastet lassen).
         if (typeof permissionOK === 'boolean') {
             updateData.permissionOK = permissionOK;
         }
 
-// Build 181 (Fix): Push beim UEBERGANG nach false — unabhaengig davon,
-        // welcher Pfad den alten Wert gesetzt hat (Vordergrund-Report ODER Ping).
-        // Der permissionOK-Wert im Doc IST die Dedup-Quelle (kein Flag mehr).
-        // Bug in 180: der Vordergrund-Report (Build 177) schreibt permissionOK
-        // direkt und setzte das permissionAlertActive-Flag nicht zurueck -> nach
-        // einer Wiederherstellung im Vordergrund blieb es true und ein erneuter
-        // Verlust loeste keinen Push aus.
-        const prevPermissionOK = cur.permissionOK;  // true | false | undefined
+        // Build 181 (Fix): Push NUR beim echten Uebergang nach false — egal, welcher
+        // Pfad (Vordergrund-Report ODER Ping) den alten Wert gesetzt hat.
+        // permissionOK im Doc IST die Dedup-Quelle (kein Flag mehr).
         if (permissionOK === false && prevPermissionOK !== false && parentTokens.length > 0) {
             await sendPermissionLostPush(parentTokens, childId, childName);
         }
 
         await childRef.update(updateData);
-        
+
         console.log(`Ping response from child ${childId} in family ${familyId}`);
         return {
             statusCode: 200,

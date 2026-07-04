@@ -490,6 +490,38 @@ function buildMessage(token, action, childId, childName, childFCMToken, language
                 }
             };
 
+        case 'permission_lost':
+            console.log(`permission_lost: Using loc-key with childName="${childName}"`);
+            return {
+                token: token,
+                data: baseData,
+                apns: {
+                    headers: {
+                        'apns-priority': '10',
+                        'apns-push-type': 'alert'
+                    },
+                    payload: {
+                        aps: {
+                            sound: 'default',
+                            badge: 1,
+                            alert: {
+                                title: 'PauseNow',
+                                'loc-key': 'permission_lost_message',
+                                'loc-args': [childName || 'Kind']
+                            }
+                        }
+                    }
+                },
+                android: {
+                    priority: 'high',
+                    notification: {
+                        title: 'PauseNow',
+                        body: `Bei ${childName} fehlt die Bildschirmzeit-Freigabe. Bitte Gerät prüfen.`
+                    },
+                    data: baseData
+                }
+            };
+
         default:
             // Silent Push für alle anderen Actions
             return {

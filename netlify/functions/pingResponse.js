@@ -122,20 +122,16 @@ exports.handler = async (event, context) => {
             updateData.permissionOK = permissionOK;
         }
 
-        // Build 180: Dedup -> genau ein Push pro Verlust-Episode.
-        if (permissionOK === false) {
-            if (!wasAlertActive && parentTokens.length > 0) {
-                const sent = await sendPermissionLostPush(parentTokens, childId, childName);
-                // Flag nur setzen, wenn ein Push durchkam -> sonst Retry beim naechsten Ping.
-                if (sent) {
-                    updateData.permissionAlertActive = true;
-                }
-            }
-        } else if (permissionOK === true) {
-            // Freigabe zurueck -> Flag ruecksetzen, damit ein spaeterer Verlust erneut alarmiert.
-            if (wasAlertActive) {
-                updateData.permissionAlertActive = false;
-            }
+// Build 181 (Fix): Push beim UEBERGANG nach false — unabhaengig davon,
+        // welcher Pfad den alten Wert gesetzt hat (Vordergrund-Report ODER Ping).
+        // Der permissionOK-Wert im Doc IST die Dedup-Quelle (kein Flag mehr).
+        // Bug in 180: der Vordergrund-Report (Build 177) schreibt permissionOK
+        // direkt und setzte das permissionAlertActive-Flag nicht zurueck -> nach
+        // einer Wiederherstellung im Vordergrund blieb es true und ein erneuter
+        // Verlust loeste keinen Push aus.
+        const prevPermissionOK = cur.permissionOK;  // true | false | undefined
+        if (permissionOK === false && prevPermissionOK !== false && parentTokens.length > 0) {
+            await sendPermissionLostPush(parentTokens, childId, childName);
         }
 
         await childRef.update(updateData);

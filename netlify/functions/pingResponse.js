@@ -8,6 +8,63 @@ if (!admin.apps.length) {
     });
 }
 const db = admin.firestore();
+
+// Build 180: Alert-Push an die Eltern, wenn die Bildschirmzeit-Freigabe beim Kind fehlt.
+// Format gespiegelt von sendPush.js (trickster_alert): sichtbarer Alert, loc-key -> iOS
+// uebersetzt on-device via Localizable. Direkter Versand (kein zweiter Funktions-Hop),
+// damit die Warnung nicht an einer anderen Funktion haengt.
+// Rueckgabe: true, sobald mind. ein Push zugestellt wurde.
+async function sendPermissionLostPush(parentTokens, childId, childName) {
+    let anySuccess = false;
+    for (const token of parentTokens) {
+        if (!token) continue;
+        try {
+            await admin.messaging().send({
+                token: token,
+                data: {
+                    action: 'permission_lost',
+                    childId: childId || '',
+                    childName: childName || '',
+                    timestamp: Date.now().toString()
+                },
+                apns: {
+                    headers: {
+                        'apns-priority': '10',
+                        'apns-push-type': 'alert'
+                    },
+                    payload: {
+                        aps: {
+                            sound: 'default',
+                            badge: 1,
+                            alert: {
+                                title: 'PauseNow',
+                                'loc-key': 'permission_lost_message',
+                                'loc-args': [childName || 'Kind']
+                            }
+                        }
+                    }
+                },
+                android: {
+                    priority: 'high',
+                    notification: {
+                        title: 'PauseNow',
+                        body: `${childName || 'Kind'}: Bildschirmzeit-Freigabe fehlt.`
+                    },
+                    data: {
+                        action: 'permission_lost',
+                        childId: childId || '',
+                        childName: childName || ''
+                    }
+                }
+            });
+            anySuccess = true;
+        } catch (err) {
+            console.error(`permission_lost push failed (${String(token).substring(0, 20)}...):`, err.code || err.message);
+        }
+    }
+    return anySuccess;
+}
+
 exports.handler = async (event, context) => {
     const headers = {
         'Access-Control-Allow-Origin': '*',
@@ -43,6 +100,16 @@ exports.handler = async (event, context) => {
                 body: JSON.stringify({ error: 'familyId und childId erforderlich' })
             };
         }
+        const childRef = db.collection('families').doc(familyId)
+            .collection('children').doc(childId);
+
+        // Build 180: aktuellen Stand lesen (Eltern-Tokens, Name, Dedup-Flag)
+        const snap = await childRef.get();
+        const cur = snap.exists ? snap.data() : {};
+        const wasAlertActive = cur.permissionAlertActive === true;
+        const parentTokens = Array.isArray(cur.connectedParentTokens) ? cur.connectedParentTokens : [];
+        const childName = cur.name || 'Kind';
+
         // Ping-Antwort in Firestore speichern
         const updateData = {
             lastPingResponse: admin.firestore.FieldValue.serverTimestamp(),
@@ -54,9 +121,24 @@ exports.handler = async (event, context) => {
         if (typeof permissionOK === 'boolean') {
             updateData.permissionOK = permissionOK;
         }
-        await db.collection('families').doc(familyId)
-            .collection('children').doc(childId)
-            .update(updateData);
+
+        // Build 180: Dedup -> genau ein Push pro Verlust-Episode.
+        if (permissionOK === false) {
+            if (!wasAlertActive && parentTokens.length > 0) {
+                const sent = await sendPermissionLostPush(parentTokens, childId, childName);
+                // Flag nur setzen, wenn ein Push durchkam -> sonst Retry beim naechsten Ping.
+                if (sent) {
+                    updateData.permissionAlertActive = true;
+                }
+            }
+        } else if (permissionOK === true) {
+            // Freigabe zurueck -> Flag ruecksetzen, damit ein spaeterer Verlust erneut alarmiert.
+            if (wasAlertActive) {
+                updateData.permissionAlertActive = false;
+            }
+        }
+
+        await childRef.update(updateData);
         
         console.log(`Ping response from child ${childId} in family ${familyId}`);
         return {

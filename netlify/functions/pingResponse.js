@@ -9,58 +9,6 @@ if (!admin.apps.length) {
 }
 const db = admin.firestore();
 
-// Build 181 (Fix): Alert-Push an die Eltern, wenn die Bildschirmzeit-Freigabe fehlt.
-async function sendPermissionLostPush(parentTokens, childId, childName) {
-    let anySuccess = false;
-    for (const token of parentTokens) {
-        if (!token) continue;
-        try {
-            await admin.messaging().send({
-                token: token,
-                data: {
-                    action: 'permission_lost',
-                    childId: childId || '',
-                    childName: childName || '',
-                    timestamp: Date.now().toString()
-                },
-                apns: {
-                    headers: {
-                        'apns-priority': '10',
-                        'apns-push-type': 'alert'
-                    },
-                    payload: {
-                        aps: {
-                            sound: 'default',
-                            badge: 1,
-                            alert: {
-                                title: 'PauseNow',
-                                'loc-key': 'permission_lost_message',
-                                'loc-args': [childName || 'Kind']
-                            }
-                        }
-                    }
-                },
-                android: {
-                    priority: 'high',
-                    notification: {
-                        title: 'PauseNow',
-                        body: `${childName || 'Kind'}: Bildschirmzeit-Freigabe fehlt.`
-                    },
-                    data: {
-                        action: 'permission_lost',
-                        childId: childId || '',
-                        childName: childName || ''
-                    }
-                }
-            });
-            anySuccess = true;
-        } catch (err) {
-            console.error(`permission_lost push failed (${String(token).substring(0, 20)}...):`, err.code || err.message);
-        }
-    }
-    return anySuccess;
-}
-
 exports.handler = async (event, context) => {
     const headers = {
         'Access-Control-Allow-Origin': '*',
@@ -88,7 +36,7 @@ exports.handler = async (event, context) => {
         };
     }
     try {
-        const { familyId, childId, respondedAt, permissionOK } = JSON.parse(event.body);
+        const { familyId, childId, respondedAt } = JSON.parse(event.body);
         if (!familyId || !childId) {
             return {
                 statusCode: 400,
@@ -96,34 +44,16 @@ exports.handler = async (event, context) => {
                 body: JSON.stringify({ error: 'familyId und childId erforderlich' })
             };
         }
-        const childRef = db.collection('families').doc(familyId)
-            .collection('children').doc(childId);
-
-        // Aktuellen Stand lesen (Eltern-Tokens, Name, vorheriger permissionOK)
-        const snap = await childRef.get();
-        const cur = snap.exists ? snap.data() : {};
-        const parentTokens = Array.isArray(cur.connectedParentTokens) ? cur.connectedParentTokens : [];
-        const childName = cur.name || 'Kind';
-        const prevPermissionOK = cur.permissionOK;  // true | false | undefined
-
-        // Ping-Antwort in Firestore speichern
-        const updateData = {
-            lastPingResponse: admin.firestore.FieldValue.serverTimestamp(),
-            lastSeen: admin.firestore.FieldValue.serverTimestamp(),
-            isResponding: true
-        };
-        if (typeof permissionOK === 'boolean') {
-            updateData.permissionOK = permissionOK;
-        }
-
-        // Build 181 (Fix): Push NUR beim echten Uebergang nach false — egal, welcher
-        // Pfad (Vordergrund-Report ODER Ping) den alten Wert gesetzt hat.
-        // permissionOK im Doc IST die Dedup-Quelle (kein Flag mehr).
-        if (permissionOK === false && prevPermissionOK !== false && parentTokens.length > 0) {
-            await sendPermissionLostPush(parentTokens, childId, childName);
-        }
-
-        await childRef.update(updateData);
+        // Nur Ping-Antwort speichern. permissionOK bewusst NICHT aus dem Ping/NSE-Pfad
+        // schreiben — NSE-Hintergrund-Read unzuverlaessig (falsche false-Alarme).
+        // permissionOK kommt ausschliesslich vom verlaesslichen Vordergrund-Pfad (Build 177).
+        await db.collection('families').doc(familyId)
+            .collection('children').doc(childId)
+            .update({
+                lastPingResponse: admin.firestore.FieldValue.serverTimestamp(),
+                lastSeen: admin.firestore.FieldValue.serverTimestamp(),
+                isResponding: true
+            });
 
         console.log(`Ping response from child ${childId} in family ${familyId}`);
         return {

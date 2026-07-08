@@ -130,7 +130,7 @@ async function checkResponses() {
                         });
                 }
                 
-                console.log(`${child.name || childId}: Not responding (${Math.round(timeSinceLastResponse / 60000)} min)`);
+                console.log(`${childId}: Not responding (${Math.round(timeSinceLastResponse / 60000)} min)`);
                 notResponding++;
                 
             } else {
@@ -142,7 +142,7 @@ async function checkResponses() {
                             isResponding: true,
                             missedPingCount: 0
                         });
-                    console.log(`${child.name || childId}: Responding OK`);
+                    console.log(`${childId}: Responding OK`);
                 }
             }
         }
@@ -206,7 +206,7 @@ async function sendPingsToAllChildren() {
                     });
                 
                 pingsSent++;
-                console.log(`Ping sent to ${child.name || childId}`);
+                console.log(`Ping sent to ${childId}`);
                 
                 // Kleine Verzoegerung zwischen Nachrichten
                 await new Promise(resolve => setTimeout(resolve, 50));
@@ -217,7 +217,7 @@ async function sendPingsToAllChildren() {
                 // Token ungueltig = App geloescht
                 if (error.code === 'messaging/invalid-registration-token' ||
                     error.code === 'messaging/registration-token-not-registered') {
-                    console.log(`Token invalid for ${child.name || childId} - App deleted`);
+                    console.log(`Token invalid for ${childId} - App deleted`);
                     
                     await db.collection('families').doc(familyId)
                         .collection('children').doc(childId)
@@ -227,7 +227,7 @@ async function sendPingsToAllChildren() {
                             tokenInvalidAt: admin.firestore.FieldValue.serverTimestamp()
                         });
                 } else {
-                    console.error(`Failed to ping ${child.name || childId}:`, error.message);
+                    console.error(`Failed to ping ${childId}:`, error.message);
                 }
             }
         }

@@ -196,7 +196,7 @@ exports.handler = async (event, context) => {
         console.log(`Single Token: ${token ? token.substring(0, 20) + '...' : 'NONE'}`);
         console.log(`Multi Tokens: ${tokens ? tokens.length : 0}`);
         console.log(`Language: ${language || 'en (default)'}`);
-        console.log(`ChildName: ${childName || 'NONE'}`);
+        console.log(`ChildId: ${childId || 'NONE'}`);
         console.log(`iOS Notification: ${notification ? 'YES (title: ' + notification.title + ')' : 'NO (using fallback)'}`);
         
         // Multi-Parent: Wenn tokens Array vorhanden, an alle senden
@@ -333,7 +333,7 @@ function buildMessage(token, action, childId, childName, childFCMToken, language
     // Action-spezifische Nachrichten
     switch (action) {
         case 'unlock_request':
-            console.log(`unlock_request: Using loc-key with childName="${childName}"`);
+            console.log(`unlock_request: Using loc-key with childId="${childId}"`);
             
             return {
                 token: token,
@@ -463,7 +463,7 @@ function buildMessage(token, action, childId, childName, childFCMToken, language
             };
 
         case 'trickster_alert':
-            console.log(`trickster_alert: Using loc-key with childName="${childName}"`);
+            console.log(`trickster_alert: Using loc-key with childId="${childId}"`);
             return {
                 token: token,
                 data: baseData,
@@ -491,7 +491,7 @@ function buildMessage(token, action, childId, childName, childFCMToken, language
             };
 
         case 'permission_lost':
-            console.log(`permission_lost: Using loc-key with childName="${childName}"`);
+            console.log(`permission_lost: Using loc-key with childId="${childId}"`);
             return {
                 token: token,
                 data: baseData,

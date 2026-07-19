@@ -9,6 +9,14 @@ if (!admin.apps.length) {
     });
 }
 
+// ===== (Z) Angriff #1 — sendPush-Haertung (Track 1) =====
+// - fail-closed: kein Dev-Key-Fallback (PAUSENOW_API_KEY Pflicht)
+// - Zahn-Actions pause/activate: idToken-Verify + Ownership (memberIds & !removedUIDs)
+//   + Target-Binding (children/{childId}.fcmToken == token)
+// - family_deleted: NIE ueber sendPush legitim (CF-only) -> hart 403
+// - unpair_device: bleibt in Track 1 im Dual-Accept, wandert in Track 2 in eine eigene CF
+// - Dual-Accept via ENFORCE_TOOTH_IDTOKEN (Flip zusammen mit dem Rules-Flip)
+
 // Lokalisierte Strings für Push-Nachrichten (Fallback wenn iOS nichts sendet)
 const translations = {
     en: {
@@ -58,7 +66,7 @@ exports.handler = async (event, context) => {
     // CORS Headers
     const headers = {
         'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'Content-Type, X-Api-Key',
+        'Access-Control-Allow-Headers': 'Content-Type, X-Api-Key, Authorization',
         'Access-Control-Allow-Methods': 'POST, OPTIONS'
     };
 
@@ -202,6 +210,83 @@ exports.handler = async (event, context) => {
         console.log(`Language: ${language || 'en (default)'}`);
         console.log(`ChildId: ${childId || 'NONE'}`);
         console.log(`iOS Notification: ${notification ? 'YES (title: ' + notification.title + ')' : 'NO (using fallback)'}`);
+
+        // ===== (Z) Angriff #1: Zahn-Action-Gate =====
+        // Shield-relevante Actions duerfen nicht allein mit dem (extrahierbaren) Shared Key
+        // ausgeloest werden. Ownership wird serverseitig erzwungen.
+        const TOOTH_ACTIONS = ['pause', 'activate'];
+        const CF_ONLY_ACTIONS = ['family_deleted']; // unpair_device folgt in Track 2 (eigene CF)
+        const ENFORCE_TOOTH_IDTOKEN = process.env.ENFORCE_TOOTH_IDTOKEN === 'true';
+
+        // family_deleted kommt ausschliesslich aus onFamilyDeleted / cleanupInactiveFamilies
+        // (Admin-SDK direkt) -> ueber sendPush IMMER ablehnen.
+        if (CF_ONLY_ACTIONS.includes(action)) {
+            console.log(`Blocked CF-only action via sendPush: ${action}`);
+            return { statusCode: 403, headers, body: JSON.stringify({ error: 'Action not allowed via sendPush' }) };
+        }
+
+        if (TOOTH_ACTIONS.includes(action)) {
+            const authz = event.headers['authorization'] || event.headers['Authorization'] || '';
+            const idToken = authz.startsWith('Bearer ') ? authz.slice(7) : null;
+
+            if (!idToken) {
+                // Dual-Accept: Clients ohne idToken (Alt/Frozen) noch via Key durchlassen.
+                // Flip ENFORCE_TOOTH_IDTOKEN=true (Schritt 8, mit Rules-Flip) -> 403.
+                if (ENFORCE_TOOTH_IDTOKEN) {
+                    console.log(`Tooth-action without idToken rejected (enforced): ${action}`);
+                    return { statusCode: 403, headers, body: JSON.stringify({ error: 'idToken required' }) };
+                }
+                console.log(`LEGACY tooth-action without idToken (dual-accept): ${action}`);
+            } else {
+                // idToken vorhanden -> IMMER verifizieren + Ownership erzwingen.
+                // checkRevoked=true honoriert revokePartner.revokeRefreshTokens (Defense-in-Depth).
+                // Faellt es je bei legitimen Eltern falsch-positiv aus: zweites Argument entfernen
+                // -> die removedUIDs-Pruefung unten haelt die Linie weiterhin.
+                let decoded;
+                try {
+                    decoded = await admin.auth().verifyIdToken(idToken, true);
+                } catch (e) {
+                    console.log(`Invalid/revoked idToken: ${e.message}`);
+                    return { statusCode: 401, headers, body: JSON.stringify({ error: 'Invalid idToken' }) };
+                }
+                const callerUid = decoded.uid;
+
+                const { familyId } = requestBody;
+                if (!familyId) {
+                    return { statusCode: 400, headers, body: JSON.stringify({ error: 'familyId required for this action' }) };
+                }
+                if (!childId) {
+                    return { statusCode: 400, headers, body: JSON.stringify({ error: 'childId required for this action' }) };
+                }
+
+                const db = admin.firestore();
+                const famSnap = await db.collection('families').doc(familyId).get();
+                if (!famSnap.exists) {
+                    return { statusCode: 404, headers, body: JSON.stringify({ error: 'Family not found' }) };
+                }
+                const fam = famSnap.data();
+                const isMember = Array.isArray(fam.memberIds) && fam.memberIds.includes(callerUid);
+                const isRemoved = Array.isArray(fam.removedUIDs) && fam.removedUIDs.includes(callerUid);
+                if (!isMember || isRemoved) {
+                    console.log(`Ownership denied: caller ${callerUid} not member / removed for ${familyId}`);
+                    return { statusCode: 403, headers, body: JSON.stringify({ error: 'Not authorized for this family' }) };
+                }
+
+                // Target-Binding: Ziel-Token muss zum Kind DIESER Familie gehoeren
+                // -> verhindert, dass ein Mitglied von Familie A an ein Kind von Familie B pusht.
+                const childSnap = await db.collection('families').doc(familyId)
+                    .collection('children').doc(childId).get();
+                if (!childSnap.exists) {
+                    return { statusCode: 403, headers, body: JSON.stringify({ error: 'Child not in this family' }) };
+                }
+                if (childSnap.data().fcmToken !== token) {
+                    console.log('Target token does not match child fcmToken');
+                    return { statusCode: 403, headers, body: JSON.stringify({ error: 'Target token mismatch' }) };
+                }
+                console.log(`Ownership OK: ${callerUid} -> ${familyId}/${childId}`);
+            }
+        }
+        // ===== Ende Zahn-Action-Gate =====
         
         // Multi-Parent: Wenn tokens Array vorhanden, an alle senden
         if (tokens && Array.isArray(tokens)) {

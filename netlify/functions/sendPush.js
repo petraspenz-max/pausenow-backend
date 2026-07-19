@@ -80,9 +80,13 @@ exports.handler = async (event, context) => {
     }
 
     // Security Check
-    const API_KEY = process.env.PAUSENOW_API_KEY || 'dev-key-pausenow-2025';
+    const API_KEY = process.env.PAUSENOW_API_KEY;
     const requestKey = event.headers['x-api-key'] || event.headers['X-Api-Key'];
 
+    if (!API_KEY) {
+        console.error('PAUSENOW_API_KEY not configured - failing closed');
+        return { statusCode: 500, headers, body: JSON.stringify({ error: 'Server misconfigured' }) };
+    }
     if (!requestKey || requestKey !== API_KEY) {
         console.log('Unauthorized request blocked');
         return {

@@ -1,4 +1,5 @@
 const admin = require('firebase-admin');
+const { schedule } = require('@netlify/functions');
 
 // Firebase Admin SDK initialisieren
 if (!admin.apps.length) {
@@ -11,81 +12,29 @@ if (!admin.apps.length) {
 
 const db = admin.firestore();
 
-exports.handler = async (event, context) => {
-    const headers = {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'Content-Type, X-Api-Key',
-        'Access-Control-Allow-Methods': 'POST, GET, OPTIONS'
-    };
-
-    if (event.httpMethod === 'OPTIONS') {
-        return { statusCode: 200, headers, body: '' };
-    }
-
-    // Security Check - API Key Authentifizierung
-    // Scheduled Functions von Netlify senden keinen API Key,
-    // daher pruefen wir auf den Scheduled-Event-Header ODER einen gueltigen API Key
-    const isScheduled = event.headers['x-nf-event'] === 'schedule' || 
-                        event.headers['X-Nf-Event'] === 'schedule';
-    
-    if (!isScheduled) {
-        const API_KEY = process.env.PAUSENOW_API_KEY;
-        if (!API_KEY) {
-            console.error('PAUSENOW_API_KEY not configured');
-            return {
-                statusCode: 500,
-                headers,
-                body: JSON.stringify({ error: 'Server configuration error' })
-            };
-        }
-        
-        const requestKey = event.headers['x-api-key'] || event.headers['X-Api-Key'];
-        if (!requestKey || requestKey !== API_KEY) {
-            return {
-                statusCode: 401,
-                headers,
-                body: JSON.stringify({ error: 'Unauthorized' })
-            };
-        }
-    }
-
+exports.handler = schedule('*/2 * * * *', async () => {
     try {
-        console.log('=== PINGCHECK STARTED ===');
+        console.log('=== PINGCHECK STARTED (scheduled) ===');
         console.log('Time:', new Date().toISOString());
-        console.log('Triggered by:', isScheduled ? 'Scheduled' : 'API call');
-        
+
         // PHASE 1: Pruefe Antworten auf letzte Pings (isResponding tracken)
         const checkResult = await checkResponses();
-        
+
         // PHASE 2: Sende neue Pings an alle Kinder
         const pingResult = await sendPingsToAllChildren();
-        
+
         console.log('=== PINGCHECK COMPLETE ===');
         console.log('Pings sent:', pingResult.pingsSent);
         console.log('Not responding:', checkResult.notResponding);
         console.log('Offline children:', checkResult.offlineChildren);
-        
-        return {
-            statusCode: 200,
-            headers,
-            body: JSON.stringify({
-                success: true,
-                pingsSent: pingResult.pingsSent,
-                notResponding: checkResult.notResponding,
-                offlineChildren: checkResult.offlineChildren,
-                timestamp: new Date().toISOString()
-            })
-        };
+
+        return { statusCode: 200 };
 
     } catch (error) {
         console.error('PingCheck Error:', error);
-        return {
-            statusCode: 500,
-            headers,
-            body: JSON.stringify({ error: error.message })
-        };
+        return { statusCode: 500 };
     }
-};
+});
 
 // PHASE 1: Pruefe ob Kinder auf Pings antworten
 // Setzt NUR isResponding - KEINE Trickster-Logik!

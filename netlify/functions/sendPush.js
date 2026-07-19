@@ -215,7 +215,7 @@ exports.handler = async (event, context) => {
         // Shield-relevante Actions duerfen nicht allein mit dem (extrahierbaren) Shared Key
         // ausgeloest werden. Ownership wird serverseitig erzwungen.
         const TOOTH_ACTIONS = ['pause', 'activate'];
-        const CF_ONLY_ACTIONS = ['family_deleted']; // unpair_device folgt in Track 2 (eigene CF)
+        const CF_ONLY_ACTIONS = ['family_deleted', 'unpair_device']; // unpair laeuft jetzt ueber CF unpairChild -> sendPush hart 403
         const ENFORCE_TOOTH_IDTOKEN = process.env.ENFORCE_TOOTH_IDTOKEN === 'true';
 
         // family_deleted kommt ausschliesslich aus onFamilyDeleted / cleanupInactiveFamilies
